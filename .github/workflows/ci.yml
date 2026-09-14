@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           use-mamba: true
@@ -39,7 +39,7 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           use-mamba: true
