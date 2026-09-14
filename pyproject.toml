@@ -1,0 +1,9 @@
+[project]
+name = "verireturn"
+version = "0.1.0"
+description = "A verifiable transaction agent for Chinese e-commerce after-sales service."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["backend/tests"]

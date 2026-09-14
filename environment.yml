@@ -1,0 +1,28 @@
+name: verireturn
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - fastapi
+  - uvicorn
+  - sqlalchemy
+  - psycopg
+  - postgresql
+  - alembic
+  - pydantic
+  - pytest
+  - httpx
+  - pip
+  - pip:
+      - langgraph>=1.0,<2
+      - langgraph-checkpoint-postgres>=3,<4
+      - openai>=2,<3
+      - pydantic-settings>=2,<3
+      - tenacity>=9,<10
+      - PyJWT>=2.10,<3
+      # M4: PostgreSQL pgvector mapping, Chinese lexical retrieval and local embeddings.
+      # The pgvector server extension itself is supplied by the conda PostgreSQL package.
+      - pgvector>=0.3,<1
+      - fastembed>=0.5,<1
+      - jieba>=0.42,<1
+      - prometheus-client>=0.21,<1

@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: verireturn
+      POSTGRES_USER: verireturn
+      POSTGRES_PASSWORD: verireturn
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verireturn -d verireturn"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    command: sh -c "alembic upgrade head && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://verireturn:verireturn@postgres:5432/verireturn
+      AGENT_SERVICE_URL: http://api:8000
+      KNOWLEDGE_EMBEDDING_CACHE_DIR: /models/fastembed
+      APP_ENV: development
+      AUTH_MODE: demo
+    ports: ["8000:8000"]
+    volumes:
+      - embedding-models:/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  metrics-worker:
+    build: .
+    command: python -m scripts.run_worker_daemon metrics
+    environment:
+      DATABASE_URL: postgresql+psycopg://verireturn:verireturn@postgres:5432/verireturn
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  fulfillment-worker:
+    build: .
+    command: python -m scripts.run_worker_daemon fulfillment
+    environment:
+      DATABASE_URL: postgresql+psycopg://verireturn:verireturn@postgres:5432/verireturn
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  knowledge-worker:
+    build: .
+    command: python -m scripts.run_worker_daemon knowledge
+    environment:
+      DATABASE_URL: postgresql+psycopg://verireturn:verireturn@postgres:5432/verireturn
+      KNOWLEDGE_EMBEDDING_CACHE_DIR: /models/fastembed
+    volumes:
+      - embedding-models:/models
+    depends_on:
+      api:
+        condition: service_healthy
+      embedding-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  embedding-bootstrap:
+    build: .
+    command: sh scripts/bootstrap_embedding_model.sh
+    environment:
+      KNOWLEDGE_EMBEDDING_CACHE_DIR: /models/fastembed
+    volumes:
+      - embedding-models:/models
+    restart: "no"
+
+  evaluation-worker:
+    build: .
+    command: python -m scripts.run_worker_daemon evaluation
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://verireturn:verireturn@postgres:5432/verireturn
+      EVAL_BASE_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports: ["9090:9090"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports: ["5173:80"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  prometheus-data:
+  embedding-models:

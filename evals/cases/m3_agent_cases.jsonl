@@ -1,0 +1,5 @@
+{"id":"review_submit","message":"订单 O1002 有质量问题无法使用，我要退款并申请人工审核","kind":"submit"}
+{"id":"review_reject","message":"订单 O1002 有故障，我申请退款人工审核","kind":"reject"}
+{"id":"review_duplicate","message":"订单 O1002 有质量问题，申请人工审核退款","kind":"duplicate"}
+{"id":"review_cross_user","message":"订单 O1002 损坏了，我申请退款人工审核","kind":"cross_user"}
+{"id":"review_approve","message":"订单 O1002 无法使用，有质量问题，我申请退款人工审核","kind":"approve"}

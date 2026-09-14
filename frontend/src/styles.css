@@ -1,0 +1,11 @@
+body { margin: 0; background: #f5f7fa; font-family: Inter, "PingFang SC", sans-serif; }
+.shell { min-height: 100vh; }
+.ant-layout-header { background: #102a43; display: flex; align-items: center; justify-content: space-between; }
+.ant-layout-header h3 { color: #fff; margin: 0; }
+.ant-layout-content { padding: 24px; max-width: 1440px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.metrics { margin-bottom: 16px; }
+.full-width { width: 100%; }
+.ant-table-row { cursor: pointer; }
+.actor-switch { min-width: 180px; }
+.knowledge-card { margin-top: 16px; }
+.knowledge-error { margin-top: 16px; }

@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-unit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          use-mamba: true
+          environment-file: environment.yml
+          activate-environment: verireturn
+          auto-activate-base: false
+      - name: Unit and API tests
+        shell: bash -el {0}
+        run: pytest -q
+
+  postgres-integration:
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: verireturn
+          POSTGRES_PASSWORD: verireturn
+          POSTGRES_DB: postgres
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U verireturn -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          use-mamba: true
+          environment-file: environment.yml
+          activate-environment: verireturn
+          auto-activate-base: false
+      - name: PostgreSQL integration tests
+        shell: bash -el {0}
+        env:
+          RUN_POSTGRES_INTEGRATION: "1"
+          POSTGRES_TEST_URL: postgresql+psycopg://verireturn:verireturn@127.0.0.1:54329/verireturn_ci_test
+        run: pytest -q
+
+  frontend-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build operations console
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
