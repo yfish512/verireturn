@@ -10,9 +10,9 @@
 本地检查：
 
 ```sh
-/data/user004/miniforge3/bin/mamba run -n verireturn pytest -q
+mamba run -n verireturn pytest -q
 RUN_POSTGRES_INTEGRATION=1 \
-  /data/user004/miniforge3/bin/mamba run -n verireturn pytest -q
+  mamba run -n verireturn pytest -q
 (cd frontend && npm ci && npm run build)
 ```
 

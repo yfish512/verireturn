@@ -90,7 +90,7 @@ M1 已实现全部状态。`completed` 仅接受模拟物流系统的内部回�
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn alembic upgrade head
+  mamba run -n verireturn alembic upgrade head
 ```
 
 之后所有 schema 变动都通过 Alembic migration 完成：

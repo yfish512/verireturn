@@ -51,11 +51,11 @@ React 运营台新增 M4 知识表格、运营身份切换、草稿创建、索�
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.seed_m4_knowledge
+  mamba run -n verireturn python -m scripts.seed_m4_knowledge
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.run_knowledge_worker
+  mamba run -n verireturn python -m scripts.run_knowledge_worker
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.publish_m4_demo_knowledge
+  mamba run -n verireturn python -m scripts.publish_m4_demo_knowledge
 ```
 
 演示语料是项目原创模拟政策和 SOP，明确不代表任一真实电商平台规则。

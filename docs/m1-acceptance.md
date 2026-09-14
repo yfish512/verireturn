@@ -5,12 +5,12 @@ M1 不接入 LLM、LangGraph 或聊天 UI。它交付 Agent 可调用的业务�
 ## 验收流程
 
 ```sh
-/data/user004/miniforge3/bin/mamba run -n verireturn sh scripts/local_postgres.sh start
+mamba run -n verireturn sh scripts/local_postgres.sh start
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn alembic upgrade head
-/data/user004/miniforge3/bin/mamba run -n verireturn pytest -q
+  mamba run -n verireturn alembic upgrade head
+mamba run -n verireturn pytest -q
 RUN_POSTGRES_INTEGRATION=1 \
-  /data/user004/miniforge3/bin/mamba run -n verireturn pytest -q backend/tests/test_postgres_integration.py
+  mamba run -n verireturn pytest -q backend/tests/test_postgres_integration.py
 ```
 
 最后一条测试会创建、迁移并删除独立的 `verireturn_m1_test` 数据库；它不会写入演示数据库。

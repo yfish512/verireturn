@@ -25,11 +25,11 @@
 
 ```sh
 RUN_POSTGRES_INTEGRATION=1 \
-  /data/user004/miniforge3/bin/mamba run -n verireturn pytest -q
+  mamba run -n verireturn pytest -q
 # 34 passed, 1 warning
 
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn alembic check
+  mamba run -n verireturn alembic check
 # No new upgrade operations detected.
 
 cd frontend && npm run build
@@ -50,7 +50,7 @@ M3 改动后于 2026-09-14 复跑 M2 真实 DeepSeek 30 case 回归，结果为 
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn uvicorn backend.app.main:app --port 8000
+  mamba run -n verireturn uvicorn backend.app.main:app --port 8000
 
 cd frontend
 npm run dev

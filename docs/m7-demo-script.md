@@ -5,9 +5,9 @@
 ```sh
 M7_AGENT_MODE=live sh scripts/start_m7_local.sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.demo_m7
+  mamba run -n verireturn python -m scripts.demo_m7
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.verify_m7_demo
+  mamba run -n verireturn python -m scripts.verify_m7_demo
 ```
 
 结束后执行 `sh scripts/stop_m7_local.sh`。它只停止由 M7 启动脚本记录的进程；本地 PostgreSQL 保留运行，以便继续开发。

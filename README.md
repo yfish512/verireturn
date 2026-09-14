@@ -15,21 +15,23 @@ VeriReturn 是一个面向中文电商售后的可验证事务型 Agent 项目�
 
 Python 依赖和 PostgreSQL server 都通过 Miniforge 的 `verireturn` 环境管理，不需要系统级安装数据库。首次或依赖更新后执行：
 
+以下命令假设 `mamba` 已在 `PATH` 中；若未初始化 shell，可显式设置 `MAMBA_BIN=/path/to/miniforge/bin/mamba`。
+
 ```sh
-/data/user004/miniforge3/bin/mamba env update -f environment.yml
+mamba env update -f environment.yml
 ```
 
 启动环境内的本地 PostgreSQL：
 
 ```sh
-/data/user004/miniforge3/bin/mamba run -n verireturn sh scripts/local_postgres.sh start
+mamba run -n verireturn sh scripts/local_postgres.sh start
 ```
 
 数据库服务第一次启动后，执行首个 schema migration：
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn alembic upgrade head
+  mamba run -n verireturn alembic upgrade head
 ```
 
 `.env.example` 是部署环境变量的样例；当前开发命令直接显式传入 `DATABASE_URL`，避免把连接配置隐式写入代码。
@@ -56,18 +58,18 @@ M4 用 PostgreSQL `pgvector`、中文全文检索和本地 `BAAI/bge-small-zh-v1
 首次使用 M4 前，准备固定的本地模型文件：
 
 ```sh
-/data/user004/miniforge3/bin/mamba run -n verireturn sh scripts/bootstrap_embedding_model.sh
+mamba run -n verireturn sh scripts/bootstrap_embedding_model.sh
 ```
 
 然后可装载原创演示语料、索引并发布：
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.seed_m4_knowledge
+  mamba run -n verireturn python -m scripts.seed_m4_knowledge
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.run_knowledge_worker
+  mamba run -n verireturn python -m scripts.run_knowledge_worker
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.publish_m4_demo_knowledge
+  mamba run -n verireturn python -m scripts.publish_m4_demo_knowledge
 ```
 
 完整边界、表结构和评测见 [M4 设计](docs/m4-design.md) 与 [M4 验收](docs/m4-acceptance.md)。
@@ -75,10 +77,10 @@ DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
 ## 运行 API
 
 ```sh
-/data/user004/miniforge3/bin/mamba env create -f environment.yml
-/data/user004/miniforge3/bin/mamba run -n verireturn sh scripts/local_postgres.sh start
+mamba env create -f environment.yml
+mamba run -n verireturn sh scripts/local_postgres.sh start
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn uvicorn backend.app.main:app --reload
+  mamba run -n verireturn uvicorn backend.app.main:app --reload
 ```
 
 服务启动后访问 `http://127.0.0.1:8000/docs`。
@@ -130,7 +132,7 @@ Provider 回调只接受 `POST /internal/fulfillment/webhooks/demo_fulfillment`�
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.run_fulfillment_worker
+  mamba run -n verireturn python -m scripts.run_fulfillment_worker
 ```
 
 完整事件契约、失败语义与验收矩阵见 [M5 设计](docs/m5-design.md)。
@@ -141,10 +143,10 @@ M6 将 Agent、审核、知识与履约事实关联为可下钻 trace，并用 P
 
 ```sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.run_metrics_worker
+  mamba run -n verireturn python -m scripts.run_metrics_worker
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
   EVAL_BASE_URL=http://127.0.0.1:8000 \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.run_evaluation_worker
+  mamba run -n verireturn python -m scripts.run_evaluation_worker
 ```
 
 设计和验收见 [M6 设计](docs/m6-design.md)。
@@ -156,9 +158,9 @@ M7 将 M1–M6 固定为非 Docker 的本地作品集演示：脚本幂等写入
 ```sh
 M7_AGENT_MODE=live sh scripts/start_m7_local.sh
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.demo_m7
+  mamba run -n verireturn python -m scripts.demo_m7
 DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
-  /data/user004/miniforge3/bin/mamba run -n verireturn python -m scripts.verify_m7_demo
+  mamba run -n verireturn python -m scripts.verify_m7_demo
 ```
 
 运行方式、讲解顺序见 [M7 演示手册](docs/m7-demo-script.md)，架构和复现边界见 [M7 设计](docs/m7-design.md) 与 [M7 架构](docs/m7-architecture.md)，验收证据见 [M7 验收](docs/m7-acceptance.md)，简历与面试材料见 [M7 求职材料](docs/m7-resume.md)。
@@ -172,9 +174,6 @@ DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
 Docker Compose 只用于一键启动演示环境，不是开发、验收或运行 Agent 核心链路的前置条件。具备 Docker 环境时，准备本地 `.env`（以 `.env.example` 为模板，真实 DeepSeek 密钥只保存在本机）后，可启动包含 PostgreSQL/pgvector、API、履约与指标 Worker、评测 Worker、运营台和 Prometheus 的环境：
 
 ```sh
-export PATH=/data/user004/.local/docker/bin:$PATH
-export DOCKER_CONFIG=/data/user004/.local/docker-config
-export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
 docker compose up --build -d
 sh scripts/demo_m6.sh
 ```
@@ -183,13 +182,13 @@ sh scripts/demo_m6.sh
 
 首次启动时，`embedding-bootstrap` 会把固定的 FastEmbed 中文模型下载到命名卷，API 与 `knowledge-worker` 共享该卷；离线环境应先预热镜像或该模型卷。Prometheus 的 `/metrics` 仅用于受信任的本地或内网采集环境。
 
-#### 当前机器的 rootless Docker 前置条件（可选）
+#### Rootless Docker 前置条件（可选）
 
-项目目录已经具备 Docker CLI 和 Compose 插件；启动 rootless daemon 仍需要主机管理员安装 `uidmap`，它提供 `newuidmap` 和 `newgidmap`，用于建立容器的用户 ID 映射。管理员执行一次：
+Rootless Docker 需要主机管理员安装 `uidmap`，它提供 `newuidmap` 和 `newgidmap`，用于建立容器的用户 ID 映射。Ubuntu/Debian 管理员可执行：
 
 ```sh
 apt-get update
 apt-get install -y uidmap
 ```
 
-随后以 `user004` 启动 Docker rootless 服务（可用 Docker 官方 rootless 安装脚本或 `dockerd-rootless-setuptool.sh install`），并设置上面的 `DOCKER_HOST`。先执行 `docker compose config --quiet`，再执行 `docker compose up --build -d`。本机已配置 `/etc/subuid` 与 `/etc/subgid` 的 `user004:165536:65536` 映射；无需改动项目代码或数据库配置。
+随后为运行 Docker 的用户配置 `/etc/subuid`、`/etc/subgid`，按 Docker 官方 rootless 安装流程启动 daemon，并设置该 daemon 对应的 `DOCKER_HOST`。先执行 `docker compose config --quiet`，再执行 `docker compose up --build -d`。
