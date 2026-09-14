@@ -13,5 +13,6 @@
 | 可观测性 | 通过 | 指标任务生成 7 个快照；演示规则生成、领取并解决告警；Trace 关联 Agent、审计、履约和 Outbox。 |
 | 真实模型演示 | 通过 | `live-v1` 批次的知识、退款和人工审核 run 均记录为 `deepseek-v4-flash` 且为 `completed`。 |
 | 自动验收 | 通过 | `M7_RUN_KEY=live-v1 mamba run -n verireturn python -m scripts.verify_m7_demo` 输出 `status: passed`，共校验 7 项持久化不变量。 |
+| 客户 Agent 展示页 | 通过 | `/agent` 以客户视角展示真实 Agent API 的回复、知识引用、待确认命令、受控工具 Trace 和履约事件；写操作仍由后端状态机执行。 |
 
 本轮同时修复了 `run_worker_daemon.py` 的参数隔离问题：此前 `knowledge` Worker 会误接收 daemon 的 worker 名称参数，现已在导入具体 runner 后清空该参数，四类长期 Worker 均可由 M7 启动器运行。

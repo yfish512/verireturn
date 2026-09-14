@@ -1,4 +1,4 @@
-import type { AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection } from "./types";
+import type { AgentMessage, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection } from "./types";
 
 const actorId = () => localStorage.getItem("verireturn.opsActor") || "OPS001";
 const idempotency = () => `ops-ui-${crypto.randomUUID()}`;
@@ -54,6 +54,18 @@ export const api = {
   }),
   resolveFulfillmentIncident: (incident: FulfillmentIncident, resolutionNote: string) => request<FulfillmentIncident>(`/ops/fulfillment/incidents/${incident.id}/resolve`, {
     method: "POST", body: JSON.stringify({ expected_version: incident.version, resolution_note: resolutionNote }),
+  }),
+  agentMessage: (actor: string, threadId: string, message: string, messageId: string) => request<AgentMessage>(`/agent/threads/${threadId}/messages`, {
+    method: "POST", headers: { "X-Demo-User-Id": actor }, body: JSON.stringify({ message, message_id: messageId }),
+  }),
+  resolveAgentConfirmation: (actor: string, confirmationId: string, approved: boolean) => request<AgentMessage>(`/agent/confirmations/${confirmationId}`, {
+    method: "POST", headers: { "X-Demo-User-Id": actor }, body: JSON.stringify({ approved }),
+  }),
+  agentToolCalls: (actor: string, runId: string) => request<AgentToolCall[]>(`/agent/runs/${runId}/tool-calls`, {
+    headers: { "X-Demo-User-Id": actor },
+  }),
+  agentFulfillment: (actor: string, caseId: number) => request<FulfillmentStatus>(`/tools/after-sales/cases/${caseId}/fulfillment`, {
+    headers: { "X-Demo-User-Id": actor },
   }),
   actorId,
   setActorId: (id: string) => localStorage.setItem("verireturn.opsActor", id),

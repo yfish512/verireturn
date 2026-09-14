@@ -165,6 +165,10 @@ DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
 
 运行方式、讲解顺序见 [M7 演示手册](docs/m7-demo-script.md)，架构和复现边界见 [M7 设计](docs/m7-design.md) 与 [M7 架构](docs/m7-architecture.md)，验收证据见 [M7 验收](docs/m7-acceptance.md)，简历与面试材料见 [M7 求职材料](docs/m7-resume.md)。
 
+### 客户 Agent 展示页
+
+启动本地运行时后访问 `http://127.0.0.1:5173/agent`。该页面通过真实 Agent API 展示对话、发布知识引用、受控工具调用、待确认命令和履约事件；运营治理界面仍位于根路径 `http://127.0.0.1:5173`。前端只渲染服务器返回的事实，不参与资格、金额、权限或状态决策。
+
 ## 开源与贡献
 
 项目采用 [MIT License](LICENSE)。提交代码前请阅读 [贡献指南](CONTRIBUTING.md) 和 [安全政策](SECURITY.md)。GitHub Actions 会执行 Python 单元/API 测试、PostgreSQL 集成测试和运营台生产构建；CI 不使用真实模型密钥、真实订单或本地运行产物。

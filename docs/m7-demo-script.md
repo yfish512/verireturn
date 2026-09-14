@@ -23,4 +23,6 @@ DATABASE_URL=postgresql+psycopg://verireturn@127.0.0.1:54329/verireturn \
 5. 打开 `http://127.0.0.1:5173`，查看质量争议审核时间线、M6 指标、告警历史和 Trace 下钻。
 6. 运行 verifier，强调它检查的是售后单、确认、工具调用、Outbox、Webhook、审核事件、指标快照和告警事件。
 
+客户视角从 `http://127.0.0.1:5173/agent` 打开。输入售后请求后，右侧面板显示本轮的 bounded tool Trace；若 Agent 返回 `awaiting_confirmation`，页面会显示确认或取消卡片。确认按钮只调用既有确认 API，页面不会绕过后端状态机。
+
 演示输出存放在被 Git 忽略的 `.local/m7/`，其中包含业务 ID，便于在运营台的 Trace 对话框中粘贴 `refund_run_id` 或 `refund_case_id`。

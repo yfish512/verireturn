@@ -44,3 +44,34 @@ export interface AlertRuleVersion { id: string; rule_key: string; version: numbe
 export interface TraceProjection { run_id: string | null; case_ids: number[]; tool_calls: Array<Record<string, unknown>>; audit_events: Array<Record<string, unknown>>; review_tickets: Array<Record<string, unknown>>; knowledge_retrievals: Array<Record<string, unknown>>; fulfillment_events: Array<Record<string, unknown>>; outbox_events: Array<Record<string, unknown>>; incidents: Array<Record<string, unknown>>; }
 export interface EvaluationRun { id: string; suite_id: string; suite_key: string; requested_by: string; model_name: string; prompt_version: string; status: "queued" | "running" | "succeeded" | "failed"; attempts: number; report_json: Record<string, unknown> | null; last_error: string | null; created_at: string; finished_at: string | null; }
 export interface EvaluationResult { id: string; evaluation_run_id: string; case_id: string; status: string; latency_ms: number; evidence_json: Record<string, unknown>; created_at: string; }
+
+export interface AgentMessage {
+  thread_id: string;
+  run_id: string;
+  status: "completed" | "awaiting_confirmation" | "failed";
+  response: string;
+  confirmation_id: string | null;
+  case_id: number | null;
+  ticket_id: string | null;
+  retrieval_id: string | null;
+  citations: string[];
+}
+
+export interface AgentToolCall {
+  sequence_no: number;
+  graph_node: string;
+  tool_name: string;
+  arguments_json: Record<string, unknown>;
+  result_json: Record<string, unknown> | null;
+  m1_request_id: string;
+  latency_ms: number;
+  status: string;
+  error_code: string | null;
+}
+
+export interface FulfillmentStatus {
+  case_id: number;
+  status: string;
+  events: Array<{ id: string; event_type: string; sequence_no: number; occurred_at: string }>;
+  notifications: Array<{ id: string; template: string; status: string; created_at: string }>;
+}

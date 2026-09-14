@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient
 import { Alert, App as AntApp, Button, Card, Col, Descriptions, Form, Input, Layout, Modal, Row, Select, Space, Statistic, Table, Tag, Timeline, Typography, message } from "antd";
 import type { AlertRuleVersion, EvaluationRun, FulfillmentIncident, KnowledgeAudience, KnowledgeDocument, OpsAlert, Ticket, TicketStatus, TraceProjection } from "./types";
 import { api } from "./api";
+import { AgentShowcase } from "./AgentShowcase";
 import "./styles.css";
 
 const statuses: TicketStatus[] = ["open", "claimed", "waiting_customer", "approved", "rejected", "closed", "expired"];
@@ -60,4 +61,5 @@ function Console() {
 }
 
 const queryClient = new QueryClient();
-createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={queryClient}><AntApp><Console /></AntApp></QueryClientProvider></StrictMode>);
+const page = window.location.pathname.startsWith("/agent") ? <AgentShowcase /> : <Console />;
+createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={queryClient}><AntApp>{page}</AntApp></QueryClientProvider></StrictMode>);
