@@ -736,7 +736,7 @@ class PaymentTransaction(Base):
         UniqueConstraint("provider", "provider_payment_id", name="uq_payment_provider_reference"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), unique=True, index=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), unique=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     provider: Mapped[str] = mapped_column(String(32))
     provider_payment_id: Mapped[str] = mapped_column(String(128))
