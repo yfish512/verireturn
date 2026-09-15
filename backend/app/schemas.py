@@ -23,8 +23,13 @@ class EligibilityResponse(BaseModel):
     eligible_amount: Decimal | None = None
 
 
+class AfterSalesItemRequest(BaseModel):
+    order_item_id: str = Field(min_length=8, max_length=36)
+    quantity: int = Field(ge=1, le=99)
+
+
 class AfterSalesCreateRequest(EligibilityRequest):
-    pass
+    items: list[AfterSalesItemRequest] | None = Field(default=None, max_length=20)
 
 
 class AfterSalesCaseResponse(BaseModel):

@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from ..models import AfterSalesCase, PaymentProviderEvent, PaymentReconciliationItem, PaymentReconciliationRun, PaymentTransaction, RefundAttempt, RefundIntent
+from ..models import AfterSalesCase, AfterSalesItem, OrderItem, PaymentProviderEvent, PaymentReconciliationItem, PaymentReconciliationRun, PaymentTransaction, RefundAttempt, RefundIntent
 from .service import DomainError, _audit
 
 
@@ -54,6 +54,12 @@ def apply_refund_settlement(db: Session, provider: str, provider_refund_id: str,
         case = db.get(AfterSalesCase, intent.case_id); transaction = db.get(PaymentTransaction, intent.payment_transaction_id); assert case and transaction
         if succeeded:
             case.status, case.completed_at, transaction.status = "completed", datetime.now(timezone.utc), "refunded"
+            for line in db.scalars(select(AfterSalesItem).where(AfterSalesItem.case_id == case.id)):
+                order_item = db.scalar(select(OrderItem).where(OrderItem.id == line.order_item_id).with_for_update())
+                assert order_item is not None
+                if order_item.refunded_quantity + line.quantity > order_item.quantity:
+                    raise DomainError("REFUND_QUANTITY_EXCEEDED", "退款数量超过订单商品数量。", 409)
+                order_item.refunded_quantity += line.quantity
             _audit(db, case.id, "REFUND_SETTLED", "支付渠道确认退款成功。", "internal_service", provider, event_id)
         else: _audit(db, case.id, "REFUND_FAILED", "支付渠道返回退款失败，等待运营处理。", "internal_service", provider, event_id)
     db.commit(); return intent

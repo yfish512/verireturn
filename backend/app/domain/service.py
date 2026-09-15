@@ -140,7 +140,8 @@ def create_case(
     db: Session, user_id: str, request: AfterSalesCreateRequest, idempotency_key: str, request_id: str | None = None
 ) -> AfterSalesCase:
     operation = "create_after_sales_case"
-    payload_hash = request_fingerprint({"order_id": request.order_id, "request_type": request.request_type, "reason": request.reason})
+    item_payload = [item.model_dump() for item in request.items] if request.items else None
+    payload_hash = request_fingerprint({"order_id": request.order_id, "request_type": request.request_type, "reason": request.reason, "items": item_payload})
     existing = _existing_idempotent_case(db, user_id, operation, idempotency_key, payload_hash)
     if existing is not None:
         return existing
@@ -154,12 +155,21 @@ def create_case(
         )
         db.add(case)
         db.flush()
-        item = db.scalar(select(OrderItem).where(OrderItem.order_id == request.order_id).with_for_update())
-        if item is None:
+        candidates = list(db.scalars(select(OrderItem).where(OrderItem.order_id == request.order_id).with_for_update()))
+        if not candidates:
             order = get_owned_order(db, user_id, request.order_id)
-            item = OrderItem(id=str(uuid4()), order_id=order.id, sku=f"legacy-{order.id}", title=order.item_name, quantity=1, unit_amount=order.amount)
-            db.add(item); db.flush()
-        db.add(AfterSalesItem(id=str(uuid4()), case_id=case.id, order_item_id=item.id, quantity=1, refund_amount=decision.eligible_amount))
+            candidates = [OrderItem(id=str(uuid4()), order_id=order.id, sku=f"legacy-{order.id}", title=order.item_name, quantity=1, unit_amount=order.amount)]
+            db.add_all(candidates); db.flush()
+        selected = request.items or ([type("Legacy", (), {"order_item_id": candidates[0].id, "quantity": 1})()] if len(candidates) == 1 else [])
+        if not selected: raise DomainError("ORDER_ITEMS_REQUIRED", "该订单包含多个商品，请选择要售后的商品。", 422)
+        by_id = {item.id: item for item in candidates}
+        total = 0
+        for requested in selected:
+            item = by_id.get(requested.order_item_id)
+            if item is None or requested.quantity > item.quantity - item.refunded_quantity: raise DomainError("ORDER_ITEM_QUANTITY_INVALID", "商品不存在或可售后数量不足。", 422)
+            amount = item.unit_amount * requested.quantity; total += amount
+            db.add(AfterSalesItem(id=str(uuid4()), case_id=case.id, order_item_id=item.id, quantity=requested.quantity, refund_amount=amount))
+        case.eligible_amount = total
         _audit(db, case.id, "CASE_CREATED", "售后单已创建，等待用户确认。", "customer", user_id, request_id)
         _record_idempotency(db, user_id, operation, idempotency_key, payload_hash, case.id)
         return _commit_or_replay(db, user_id, operation, idempotency_key, payload_hash, case.id)
