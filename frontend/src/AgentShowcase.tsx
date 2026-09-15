@@ -114,7 +114,13 @@ export function AgentShowcase() {
     try {
       const result = await api.resolveAgentConfirmation(actor, item.result.confirmation_id, approved);
       const hydrated = await hydrateResult(result);
-      setItems((current) => [...current, { id: crypto.randomUUID(), role: "agent", content: result.response, result, ...hydrated }]);
+      setItems((current) => [
+        ...current.map((currentItem) => {
+          if (!currentItem.result || currentItem.result.confirmation_id !== item.result?.confirmation_id) return currentItem;
+          return { ...currentItem, result: { ...currentItem.result, status: "completed" as const } };
+        }),
+        { id: crypto.randomUUID(), role: "agent", content: result.response, result, ...hydrated },
+      ]);
       setMemory(result.memory || undefined); setActiveRunId(result.run_id); if (threadId) setTasks(await api.agentTasks(actor, threadId));
       messageApi.success(approved ? "确认已提交，Agent 已恢复执行。" : "已取消本次申请。");
     } catch (error) { messageApi.error(error instanceof Error ? error.message : "确认失败，请重试。"); }
