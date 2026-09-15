@@ -172,6 +172,9 @@ def _apply_inbox_locked(db: Session, inbox: InboxEvent, case: AfterSalesCase) ->
         return inbox.status
     target_status, audit_type, copy = target
     case.status = target_status
+    if inbox.event_type == "return.received" and case.request_type == "refund":
+        from .payments import ensure_refund_intent
+        ensure_refund_intent(db, case)
     if target_status == COMPLETED:
         case.completed_at = utcnow()
     inbox.status, inbox.rejection_code, inbox.applied_at = "applied", None, utcnow()

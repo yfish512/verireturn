@@ -726,3 +726,54 @@ class AgentTaskEvent(Base):
     payload_json: Mapped[dict] = mapped_column(JSON)
     message_id: Mapped[str | None] = mapped_column(ForeignKey("agent_message_records.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+# M9 payment records are separate from fulfillment facts. A return arriving at
+# the warehouse creates a refund intent; only a payment-provider fact settles it.
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+    __table_args__ = (
+        CheckConstraint("status IN ('captured', 'partially_refunded', 'refunded')", name="ck_payment_transaction_status"),
+        UniqueConstraint("provider", "provider_payment_id", name="uq_payment_provider_reference"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_payment_id: Mapped[str] = mapped_column(String(128))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    status: Mapped[str] = mapped_column(String(32), default="captured")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class RefundIntent(Base):
+    __tablename__ = "refund_intents"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'submitted', 'succeeded', 'failed')", name="ck_refund_intent_status"),
+        UniqueConstraint("case_id", name="uq_refund_intent_case"),
+        UniqueConstraint("provider", "provider_refund_id", name="uq_refund_provider_reference"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
+    payment_transaction_id: Mapped[str] = mapped_column(ForeignKey("payment_transactions.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    provider: Mapped[str] = mapped_column(String(32))
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    provider_refund_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RefundAttempt(Base):
+    __tablename__ = "refund_attempts"
+    __table_args__ = (UniqueConstraint("refund_intent_id", "attempt_no", name="uq_refund_attempt_sequence"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    refund_intent_id: Mapped[str] = mapped_column(ForeignKey("refund_intents.id"), index=True)
+    attempt_no: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    provider_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
