@@ -93,7 +93,8 @@ class AgentRuntime:
             return result
 
         try:
-            decision = self.extractor.extract(message)
+            context = self.memory.intent_context(thread_id, actor_id, exclude_message_id=record_id)
+            decision = self.extractor.extract(message, context=context)
         except Exception:
             decision = None
         if decision is None:

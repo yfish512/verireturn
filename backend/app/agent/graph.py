@@ -140,7 +140,7 @@ class AgentGraph:
             return update
         if result["eligible"]:
             return {**update, "final_response": f"可以申请{ '退款' if state['request_type'] == 'refund' else '换货' }，可处理金额为 {result['eligible_amount']} 元。"}
-        return {**update, "final_response": f"暂不符合售后条件：{result['explanation']}（{result['policy_code']}）。"}
+        return {**update, "last_error_code": result["policy_code"], "final_response": f"暂不符合售后条件：{result['explanation']}。"}
 
     def create_case(self, state: AgentState) -> dict:
         if not state.get("order_id"):
@@ -159,7 +159,7 @@ class AgentGraph:
         if eligibility is None:
             return update
         if not eligibility["eligible"]:
-            return {**update, "final_response": f"暂不符合售后条件：{eligibility['explanation']}（{eligibility['policy_code']}）。"}
+            return {**update, "last_error_code": eligibility["policy_code"], "final_response": f"暂不符合售后条件：{eligibility['explanation']}。"}
         created, update = self._call(
             {**state, **update}, "create_case", "create_after_sales_case",
             {"order_id": state["order_id"], "request_type": state["request_type"]},

@@ -93,7 +93,7 @@ class TaskMemory:
 
     @staticmethod
     def _extract_order(message: str) -> str | None:
-        found = re.search(r"\b(O\d+)\b", message, flags=re.IGNORECASE)
+        found = re.search(r"(?<![A-Z0-9])(O\d+)(?![A-Z0-9])", message, flags=re.IGNORECASE)
         return found.group(1).upper() if found else None
 
     @staticmethod
@@ -138,9 +138,14 @@ class TaskMemory:
                 raise ThreadAccessError("会话不存在或不属于当前客户。")
             task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id).with_for_update())
             raw_order = self._extract_order(message)
+            is_order_correction = bool(
+                task and task.intent == "create_after_sales" and task.active_case_id is None
+                and task.phase == "completed" and raw_order is not None
+            )
             is_slot_reply = bool(task and (
-                (task.phase == "awaiting_pickup_slot" and decision.intent not in _WRITE_INTENTS) or
-                (task.phase == "collecting_slots" and (
+                is_order_correction
+                or (task.phase == "awaiting_pickup_slot" and decision.intent not in _WRITE_INTENTS)
+                or (task.phase == "collecting_slots" and (
                     raw_order is not None or decision.time_slot is not None or (decision.request_type is not None and decision.intent not in _WRITE_INTENTS)
                 ))
             ))
@@ -161,7 +166,7 @@ class TaskMemory:
                     task.intent, task.phase, task.slots_json, task.active_case_id = decision.intent, "collecting_slots", slots, decision.case_id
                     task.version += 1
                     self._event(db, task, "task_replaced", {"intent": decision.intent, "slots": slots}, message_id)
-            elif task is not None and task.phase in {"collecting_slots", "awaiting_pickup_slot"}:
+            elif task is not None and (task.phase in {"collecting_slots", "awaiting_pickup_slot"} or is_order_correction):
                 slots = dict(task.slots_json)
                 changed: dict[str, Any] = {}
                 if raw_order:
@@ -212,10 +217,14 @@ class TaskMemory:
             if result.get("status") == "awaiting_confirmation":
                 task.phase, task.missing_slots = "awaiting_customer_confirmation", []
                 event = "confirmation_requested"
-            elif result.get("last_error_code") == "ORDER_NOT_FOUND":
-                bad_order = slots.pop("order_id", None)
+            elif result.get("last_error_code") in {"ORDER_NOT_FOUND", "REFUND_NOT_ELIGIBLE", "EXCHANGE_NOT_ELIGIBLE"}:
+                previous_order = slots.pop("order_id", None)
                 task.phase, task.missing_slots = "collecting_slots", ["order_id"]
-                result = {**result, "response": f"未找到 {bad_order}，请确认订单号。"}
+                if result.get("last_error_code") == "ORDER_NOT_FOUND":
+                    response = f"未找到 {previous_order}，请确认订单号。"
+                else:
+                    response = "该订单暂不符合售后条件。如订单号有误，请提供正确订单号。"
+                result = {**result, "response": response}
                 event = "slot_validation_failed"
             else:
                 task.phase, task.missing_slots = "completed", []
@@ -242,6 +251,37 @@ class TaskMemory:
             self._event(db, task, event, {"approved": approved, "case_id": case_id}, None)
             db.commit()
             return self._projection(task)
+
+    def intent_context(self, thread_id: str, actor_id: str, *, exclude_message_id: str | None = None, limit: int = 6) -> dict | None:
+        """Return a bounded, customer-owned context for ambiguous model routing.
+
+        Database task slots stay authoritative.  Transcript text only helps a
+        model resolve short references such as “那个订单” or “我刚才说错了”.
+        """
+        with self.session_factory() as db:
+            thread = db.get(AgentThread, thread_id)
+            if thread is None or thread.actor_id != actor_id:
+                raise ThreadAccessError("会话不存在或不属于当前客户。")
+            task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id))
+            statement = select(AgentMessageRecord).where(AgentMessageRecord.thread_id == thread_id)
+            if exclude_message_id:
+                statement = statement.where(AgentMessageRecord.id != exclude_message_id)
+            rows = list(db.scalars(statement.order_by(AgentMessageRecord.sequence_no.desc()).limit(limit)))
+            rows.reverse()
+            recent_turns = [
+                {"role": row.role, "content": " ".join(row.content.split())[:320]}
+                for row in rows
+            ]
+            active_task = self._projection(task)
+            if active_task is not None:
+                slots = {
+                    key: (" ".join(value.split())[:320] if isinstance(value, str) else value)
+                    for key, value in active_task["slots"].items() if value is not None
+                }
+                active_task = {**active_task, "slots": slots}
+            if active_task is None and not recent_turns:
+                return None
+            return {"active_task": active_task, "recent_turns": recent_turns}
 
     def snapshot(self, thread_id: str, actor_id: str) -> dict:
         with self.session_factory() as db:

@@ -10,7 +10,7 @@ M8 让售后 Agent 能可靠处理跨轮补充、错误订单号修正、确认�
 |---|---|---|
 | 业务事实 | M1–M7 PostgreSQL 领域表和受控工具 | 可以，领域服务决定 |
 | 当前任务 | `agent_tasks` 的槽位、阶段和版本 | 可以，只作为图的受限输入 |
-| 会话记录 | `agent_message_records` | 不可以，只用于恢复页面和短上下文 |
+| 会话记录 | `agent_message_records` | 不可以，只用于恢复页面和模型短上下文 |
 | 任务事件 | `agent_task_events` 追加事件 | 不可以，用于审计与排错 |
 | 政策知识 | 已发布知识库/pgvector | 不可以，只能解释政策 |
 
@@ -40,6 +40,7 @@ stateDiagram-v2
 - `agent_task_events` 在 PostgreSQL 上由 trigger 保护为 append-only。
 - LangGraph 使用 `run_id` 作为每一轮独立 checkpoint namespace；它只恢复 `interrupt()` 的确认操作，旧 checkpoint 槽位不会串入新消息。
 - 模型输出仅为受 Pydantic 约束的意图与候选槽位；`TaskMemory` 合并槽位，领域 API 校验订单和权限。
+- 对于需调用模型的模糊表达，`TaskMemory.intent_context()` 只传递当前任务槽位和最近 6 条、每条最多 320 字的同客户会话记录。明确动作先走本地快速路由，不发送历史记录；上下文只能消解指代，不能成为业务事实或写操作依据。
 
 ## 验收案例
 

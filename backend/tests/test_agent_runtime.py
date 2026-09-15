@@ -20,11 +20,14 @@ from backend.app.seed import seed_demo_data
 class FakeM1Tools:
     def __init__(self):
         self.calls = []
+        self.ineligible_orders: set[str] = set()
 
     def check_eligibility(self, actor_id, order_id, request_type, reason, request_id):
         self.calls.append(("check_eligibility", actor_id, order_id, request_id))
         if order_id == "O10001":
             raise ToolError("ORDER_NOT_FOUND", "订单不存在。", 404)
+        if order_id in self.ineligible_orders:
+            return {"eligible": False, "eligible_amount": "0.00", "policy_code": "REFUND_NOT_ELIGIBLE", "explanation": "无理由退款要求签收 7 天内且商品未拆封"}
         return {"eligible": True, "eligible_amount": "299.00", "policy_code": "RETURN_WITHIN_7_DAYS", "explanation": "可退款"}
 
     def create_case(self, actor_id, order_id, request_type, reason, request_id, idempotency_key):
@@ -121,10 +124,41 @@ def test_live_intent_keeps_policy_question_on_knowledge_route():
     client = FakeIntentClient('{"intent":"knowledge_qa"}')
     extractor.client = client
 
-    decision = extractor.extract("退款政策和时效是什么？")
+    context = {"active_task": {"intent": "create_after_sales", "slots": {"request_type": "refund"}}, "recent_turns": [{"role": "customer", "content": "我想退款"}]}
+    decision = extractor.extract("退款政策和时效是什么？", context=context)
 
     assert decision.intent == "knowledge_qa"
     assert len(client.calls) == 1
+    prompt = __import__("json").loads(client.calls[0]["messages"][1]["content"])
+    assert prompt["conversation_context"] == context
+
+
+class RecordingIntentExtractor:
+    model_name = "recording-intent-extractor"
+
+    def __init__(self):
+        self.fallback = KeywordIntentExtractor()
+        self.contexts: list[dict | None] = []
+
+    def extract(self, message: str, context: dict | None = None):
+        self.contexts.append(context)
+        return self.fallback.extract(message)
+
+
+def test_runtime_supplies_owned_task_and_recent_turns_to_contextual_extractor(tmp_path):
+    agent, _, _ = runtime(tmp_path)
+    extractor = RecordingIntentExtractor()
+    agent.extractor = extractor
+
+    agent.handle_message("thread-context", "U001", "帮我退一个没拆封的商品", "context-1")
+    agent.handle_message("thread-context", "U001", "O1001", "context-2")
+
+    assert extractor.contexts[0] is None
+    context = extractor.contexts[1]
+    assert context is not None
+    assert context["active_task"]["intent"] == "create_after_sales"
+    assert context["active_task"]["slots"]["reason"] == "帮我退一个没拆封的商品"
+    assert [turn["role"] for turn in context["recent_turns"]] == ["customer", "agent"]
 
 def test_agent_requires_structured_confirmation_before_confirming_case(tmp_path):
     agent, tools, sessions = runtime(tmp_path)
@@ -298,6 +332,45 @@ def test_agent_retains_refund_task_through_wrong_then_correct_order_number(tmp_p
     assert resumed["case_id"] == 42
     assert [call[0] for call in tools.calls] == ["check_eligibility", "check_eligibility", "create_case"]
 
+
+
+def test_agent_recovers_from_ineligible_order_when_customer_corrects_id_in_natural_language(tmp_path):
+    agent, tools, _ = runtime(tmp_path)
+    tools.ineligible_orders.add("O1002")
+
+    rejected = agent.handle_message("thread-correct-order", "U001", "能帮我退个商品吗，没拆封", "correct-order-1")
+    assert rejected["response"] == "可以，请提供订单号，例如 O1001。"
+    rejected = agent.handle_message("thread-correct-order", "U001", "O1002", "correct-order-2")
+    assert rejected["response"] == "该订单暂不符合售后条件。如订单号有误，请提供正确订单号。"
+    assert rejected["memory"]["phase"] == "collecting_slots"
+    assert rejected["memory"]["slots"].get("order_id") is None
+
+    corrected = agent.handle_message("thread-correct-order", "U001", "哦哦我搞错了 O1001", "correct-order-3")
+    assert corrected["status"] == "awaiting_confirmation"
+    assert corrected["case_id"] == 42
+    assert [call[0:3] for call in tools.calls] == [
+        ("check_eligibility", "U001", "O1002"),
+        ("check_eligibility", "U001", "O1001"),
+        ("create_case", "U001", "O1001"),
+    ]
+
+
+def test_agent_recovers_legacy_completed_refund_task_when_customer_corrects_order(tmp_path):
+    agent, tools, sessions = runtime(tmp_path)
+    agent.handle_message("thread-legacy-correct", "U001", "帮我退，没拆封", "legacy-correct-1")
+    with sessions() as db:
+        from backend.app.models import AgentTask
+        task = db.scalar(select(AgentTask).where(AgentTask.thread_id == "thread-legacy-correct"))
+        task.phase, task.missing_slots = "completed", []
+        task.slots_json = {**task.slots_json, "order_id": "O1002"}
+        db.commit()
+
+    corrected = agent.handle_message("thread-legacy-correct", "U001", "我搞错了O1001", "legacy-correct-2")
+    assert corrected["status"] == "awaiting_confirmation"
+    assert [call[0:3] for call in tools.calls] == [
+        ("check_eligibility", "U001", "O1001"),
+        ("create_case", "U001", "O1001"),
+    ]
 
 def test_agent_thread_memory_is_owned_by_the_customer(tmp_path):
     agent, _, _ = runtime(tmp_path)
