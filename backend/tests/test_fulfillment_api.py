@@ -35,7 +35,7 @@ def test_webhook_verifies_raw_hmac_and_idempotently_exposes_customer_facts(tmp_p
         created = client.post("/tools/after-sales/cases", json={"order_id": "O1001", "request_type": "refund", "reason": "M5 API 测试"}, headers=headers)
         case_id = created.json()["id"]
         assert client.post(f"/tools/after-sales/cases/{case_id}/confirm", headers={"X-Demo-User-Id": "U001", "Idempotency-Key": "m5-api-confirm-0001"}).status_code == 200
-        assert client.post(f"/tools/after-sales/cases/{case_id}/pickup", json={"time_slot": "2026-09-15 上午"}, headers={"X-Demo-User-Id": "U001", "Idempotency-Key": "m5-api-pickup-0001"}).status_code == 200
+        assert client.post(f"/tools/after-sales/cases/{case_id}/pickup", json={"time_slot": "明天上午"}, headers={"X-Demo-User-Id": "U001", "Idempotency-Key": "m5-api-pickup-0001"}).status_code == 200
         event = {"event_id": "api-pickup-0001", "case_id": case_id, "event_type": "pickup.collected", "sequence_no": 1, "occurred_at": datetime.now(timezone.utc).isoformat(), "payload": {"tracking": "M5API"}}
         raw = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode()
         signed = {

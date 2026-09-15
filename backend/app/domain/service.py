@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Callable
 from uuid import uuid4
 
@@ -268,15 +269,48 @@ def cancel_case(db: Session, user_id: str, case_id: int, idempotency_key: str, r
         {PENDING_CONFIRMATION, AWAITING_PICKUP, "fulfillment_exception"}, CANCELLED, "CASE_CANCELLED", "用户已取消售后操作。", request_id, after_transition=_release)
 
 
+def _validate_pickup_slot(time_slot: str, now: datetime | None = None) -> str:
+    """Accept a bounded, future Chinese reservation window; never persist opaque text as a booking."""
+    value = " ".join(time_slot.strip().split())
+    if not value or len(value) > 64:
+        raise DomainError("PICKUP_SLOT_INVALID", "请提供未来 7 天内的取件时段，例如“明天上午”或“2026-09-16 14:00”。", 422)
+    local_now = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("Asia/Shanghai"))
+    if any(marker in value for marker in ("昨天", "前天", "上周", "上个月")):
+        raise DomainError("PICKUP_SLOT_IN_PAST", "取件时段已经过去，请选择今天稍后或未来 7 天内的时段。", 422)
+    target_date = None
+    if "明天" in value: target_date = local_now.date() + timedelta(days=1)
+    elif "后天" in value: target_date = local_now.date() + timedelta(days=2)
+    elif "今天" in value: target_date = local_now.date()
+    else:
+        import re
+        match = re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})", value)
+        if match:
+            target_date = datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)), tzinfo=ZoneInfo("Asia/Shanghai")).date()
+    if target_date is None:
+        raise DomainError("PICKUP_SLOT_INVALID", "请给出日期或“今天/明天/后天”，例如“明天上午”。", 422)
+    if target_date < local_now.date() or target_date > local_now.date() + timedelta(days=7):
+        raise DomainError("PICKUP_SLOT_OUT_OF_RANGE", "仅支持预约今天稍后至未来 7 天内的取件时段。", 422)
+    # Same-day booking needs an actual future hour. Period-only text is intentionally ambiguous.
+    if target_date == local_now.date():
+        import re
+        hour = re.search(r"(?<!\d)([01]?\d|2[0-3])(?:点|:)", value)
+        if hour is None:
+            raise DomainError("PICKUP_SLOT_INVALID", "今天取件请提供具体未来时间，例如“今天 20 点”。", 422)
+        if int(hour.group(1)) <= local_now.hour:
+            raise DomainError("PICKUP_SLOT_IN_PAST", "今天该取件时间已过去，请选择更晚时间或明天。", 422)
+    return value
+
+
 def schedule_pickup(
     db: Session, user_id: str, case_id: int, time_slot: str, idempotency_key: str, request_id: str | None = None
 ) -> AfterSalesCase:
-    # The external pickup request is an intent, not a claim that a courier has
-    # collected anything. Persist it in the same transaction as the M1 state.
+    # Validate only after preserving the state-machine error for an unconfirmed case.
+    case = get_owned_case(db, user_id, case_id)
+    normalized = _validate_pickup_slot(time_slot) if case.status == AWAITING_PICKUP else time_slot
     from .fulfillment import enqueue_pickup_request
-    return _transition_case(db, user_id, case_id, "schedule_pickup", idempotency_key, {"case_id": case_id, "time_slot": time_slot},
-        {AWAITING_PICKUP}, PICKUP_SCHEDULED, "PICKUP_SCHEDULED", f"取件时段：{time_slot}", request_id,
-        pickup_slot=time_slot, invalid_code="CASE_NOT_CONFIRMED",
+    return _transition_case(db, user_id, case_id, "schedule_pickup", idempotency_key, {"case_id": case_id, "time_slot": normalized},
+        {AWAITING_PICKUP}, PICKUP_SCHEDULED, "PICKUP_SCHEDULED", f"取件时段：{normalized}", request_id,
+        pickup_slot=normalized, invalid_code="CASE_NOT_CONFIRMED",
         after_transition=lambda case: enqueue_pickup_request(db, case, idempotency_key))
 
 

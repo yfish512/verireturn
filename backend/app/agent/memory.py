@@ -276,13 +276,16 @@ class TaskMemory:
             if result.get("status") == "awaiting_confirmation":
                 task.phase, task.missing_slots = "awaiting_customer_confirmation", []
                 event = "confirmation_requested"
-            elif result.get("last_error_code") in {"ORDER_NOT_FOUND", "REFUND_NOT_ELIGIBLE", "EXCHANGE_NOT_ELIGIBLE"}:
-                previous_order = slots.pop("order_id", None)
-                task.phase, task.missing_slots = "collecting_slots", ["order_id"]
-                if result.get("last_error_code") == "ORDER_NOT_FOUND":
-                    response = f"未找到 {previous_order}，请确认订单号。"
+            elif result.get("last_error_code") in {"ORDER_NOT_FOUND", "REFUND_NOT_ELIGIBLE", "EXCHANGE_NOT_ELIGIBLE", "PICKUP_SLOT_INVALID", "PICKUP_SLOT_IN_PAST", "PICKUP_SLOT_OUT_OF_RANGE"}:
+                code = result.get("last_error_code")
+                if code.startswith("PICKUP_SLOT_"):
+                    slots["time_slot"] = None
+                    task.phase, task.missing_slots = "awaiting_pickup_slot", ["time_slot"]
+                    response = "该取件时段无效或已过期。请提供今天稍后的具体时间，或未来 7 天内的时段，例如“明天上午”。"
                 else:
-                    response = "该订单暂不符合售后条件。如订单号有误，请提供正确订单号。"
+                    previous_order = slots.pop("order_id", None)
+                    task.phase, task.missing_slots = "collecting_slots", ["order_id"]
+                    response = f"未找到 {previous_order}，请确认订单号。" if code == "ORDER_NOT_FOUND" else "该订单暂不符合售后条件。如订单号有误，请提供正确订单号。"
                 result = {**result, "response": response}
                 event = "slot_validation_failed"
             else:

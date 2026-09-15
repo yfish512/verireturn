@@ -302,7 +302,7 @@ def test_postgres_m5_claims_outbox_once_and_replays_ordered_callback(postgres_ur
         seed_demo_data(db)
         case = create_case(db, "U001", AfterSalesCreateRequest(order_id="O1001", request_type="refund", reason="M5 PostgreSQL"), "postgres-m5-create-v1")
         confirm_case(db, "U001", case.id, "postgres-m5-confirm-v1")
-        schedule_pickup(db, "U001", case.id, "2026-09-15 上午", "postgres-m5-pickup-v1")
+        schedule_pickup(db, "U001", case.id, "明天上午", "postgres-m5-pickup-v1")
         case_id = case.id
 
     def claim_once(_):

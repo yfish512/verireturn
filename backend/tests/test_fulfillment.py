@@ -25,7 +25,7 @@ def ready_case(db, request_type="refund"):
     order_id = "O1001" if request_type == "refund" else "O1003"
     case = create_case(db, "U001", AfterSalesCreateRequest(order_id=order_id, request_type=request_type, reason="M5 履约测试"), f"m5-create-{request_type}")
     confirm_case(db, "U001", case.id, f"m5-confirm-{request_type}")
-    return schedule_pickup(db, "U001", case.id, "2026-09-15 上午", f"m5-pickup-{request_type}")
+    return schedule_pickup(db, "U001", case.id, "明天上午", f"m5-pickup-{request_type}")
 
 
 def callback(case_id, event_id, event_type, sequence_no):
