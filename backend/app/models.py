@@ -777,3 +777,36 @@ class RefundAttempt(Base):
     provider_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class PaymentProviderEvent(Base):
+    __tablename__ = "payment_provider_events"
+    __table_args__ = (UniqueConstraint("provider", "provider_event_id", name="uq_payment_provider_event"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_event_id: Mapped[str] = mapped_column(String(128))
+    refund_intent_id: Mapped[str] = mapped_column(ForeignKey("refund_intents.id"), index=True)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(16))
+    payload: Mapped[dict] = mapped_column(JSON)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PaymentReconciliationRun(Base):
+    __tablename__ = "payment_reconciliation_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="completed")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaymentReconciliationItem(Base):
+    __tablename__ = "payment_reconciliation_items"
+    __table_args__ = (UniqueConstraint("run_id", "refund_intent_id", name="uq_payment_reconcile_intent"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("payment_reconciliation_runs.id"), index=True)
+    refund_intent_id: Mapped[str] = mapped_column(ForeignKey("refund_intents.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32))
+    provider_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
