@@ -21,6 +21,14 @@ class FakeRuntime:
         self.calls.append(("trace", run_id, actor_id))
         return []
 
+    def create_thread(self, actor_id):
+        self.calls.append(("create_thread", actor_id))
+        return {"thread_id": "thread-created"}
+
+    def thread_snapshot(self, thread_id, actor_id):
+        self.calls.append(("snapshot", thread_id, actor_id))
+        return {"thread_id": thread_id, "messages": [], "task": None}
+
 
 def test_agent_http_contract_injects_actor_and_uses_structured_confirmation():
     runtime = FakeRuntime()
@@ -38,5 +46,22 @@ def test_agent_http_contract_injects_actor_and_uses_structured_confirmation():
             ("message", "thread-1", "U001", "帮我退 O1001", "client-message-001"),
             ("confirmation", "confirm-1", "U001", True),
         ]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_agent_thread_endpoints_are_customer_scoped():
+    runtime = FakeRuntime()
+    app.dependency_overrides[get_agent_runtime] = lambda: runtime
+    try:
+        client = TestClient(app)
+        headers = {"X-Demo-User-Id": "U001"}
+        created = client.post("/agent/threads", headers=headers)
+        assert created.status_code == 201
+        assert created.json()["thread_id"] == "thread-created"
+        snapshot = client.get("/agent/threads/thread-created", headers=headers)
+        assert snapshot.status_code == 200
+        assert snapshot.json()["messages"] == []
+        assert runtime.calls == [("create_thread", "U001"), ("snapshot", "thread-created", "U001")]
     finally:
         app.dependency_overrides.clear()

@@ -45,6 +45,16 @@ export interface TraceProjection { run_id: string | null; case_ids: number[]; to
 export interface EvaluationRun { id: string; suite_id: string; suite_key: string; requested_by: string; model_name: string; prompt_version: string; status: "queued" | "running" | "succeeded" | "failed"; attempts: number; report_json: Record<string, unknown> | null; last_error: string | null; created_at: string; finished_at: string | null; }
 export interface EvaluationResult { id: string; evaluation_run_id: string; case_id: string; status: string; latency_ms: number; evidence_json: Record<string, unknown>; created_at: string; }
 
+export interface AgentTaskMemory {
+  task_id: string;
+  intent: string;
+  phase: "collecting_slots" | "ready_to_execute" | "awaiting_customer_confirmation" | "awaiting_pickup_slot" | "completed" | "cancelled" | "expired";
+  slots: Record<string, unknown>;
+  missing_slots: string[];
+  case_id: number | null;
+  version: number;
+}
+
 export interface AgentMessage {
   thread_id: string;
   run_id: string;
@@ -55,6 +65,13 @@ export interface AgentMessage {
   ticket_id: string | null;
   retrieval_id: string | null;
   citations: string[];
+  memory: AgentTaskMemory | null;
+}
+
+export interface AgentThreadSnapshot {
+  thread_id: string;
+  messages: Array<{ id: string; role: "customer" | "agent"; content: string; payload: AgentMessage | null }>;
+  task: AgentTaskMemory | null;
 }
 
 export interface AgentToolCall {

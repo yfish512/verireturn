@@ -7,6 +7,7 @@ from backend.app.agent.intent import KeywordIntentExtractor
 from backend.app.agent.knowledge import AgentKnowledgeService, ExtractiveAnswerGenerator
 from backend.app.agent.runtime import AgentSettings, build_agent_runtime
 from backend.app.agent.trace import TraceStore
+from backend.app.agent.tools import ToolError
 from backend.app.database import Base
 from backend.app.domain.knowledge import EMBEDDING_DIMENSIONS, create_document, process_one_ingestion_job, publish_version, queue_ingestion
 from backend.app.models import AgentConfirmation, AgentReviewConfirmation, AgentRun, AgentToolCall
@@ -20,6 +21,8 @@ class FakeM1Tools:
 
     def check_eligibility(self, actor_id, order_id, request_type, reason, request_id):
         self.calls.append(("check_eligibility", actor_id, order_id, request_id))
+        if order_id == "O10001":
+            raise ToolError("ORDER_NOT_FOUND", "订单不存在。", 404)
         return {"eligible": True, "eligible_amount": "299.00", "policy_code": "RETURN_WITHIN_7_DAYS", "explanation": "可退款"}
 
     def create_case(self, actor_id, order_id, request_type, reason, request_id, idempotency_key):
@@ -235,3 +238,46 @@ def test_agent_reads_trusted_fulfillment_fact_without_write_tool(tmp_path):
     with sessions() as db:
         calls = list(db.scalars(select(AgentToolCall).where(AgentToolCall.run_id == result["run_id"])))
         assert [(call.tool_name, call.status) for call in calls] == [("get_fulfillment_status", "succeeded")]
+
+
+def test_agent_retains_refund_task_through_wrong_then_correct_order_number(tmp_path):
+    agent, tools, _ = runtime(tmp_path)
+    first = agent.handle_message("thread-memory-repair", "U001", "你帮我退一下商品吧，没拆封", "memory-message-1")
+    assert first["status"] == "completed"
+    assert "订单号" in first["response"]
+    assert first["memory"]["intent"] == "create_after_sales"
+    assert first["memory"]["slots"]["request_type"] == "refund"
+    assert first["memory"]["slots"]["reason"] == "你帮我退一下商品吧，没拆封"
+    assert tools.calls == []
+
+    wrong = agent.handle_message("thread-memory-repair", "U001", "O10001", "memory-message-2")
+    assert "未找到订单 O10001" in wrong["response"]
+    assert wrong["memory"]["phase"] == "collecting_slots"
+    assert wrong["memory"]["slots"].get("order_id") is None
+
+    resumed = agent.handle_message("thread-memory-repair", "U001", "O1001", "memory-message-3")
+    assert resumed["status"] == "awaiting_confirmation"
+    assert resumed["case_id"] == 42
+    assert [call[0] for call in tools.calls] == ["check_eligibility", "check_eligibility", "create_case"]
+
+
+def test_agent_thread_memory_is_owned_by_the_customer(tmp_path):
+    agent, _, _ = runtime(tmp_path)
+    agent.handle_message("thread-memory-owner", "U001", "帮我退，没拆封", "memory-owner-1")
+    try:
+        agent.handle_message("thread-memory-owner", "U002", "O1001", "memory-owner-2")
+    except Exception as error:
+        assert getattr(error, "code") == "THREAD_NOT_FOUND"
+    else:
+        raise AssertionError("其他客户不应读取或污染会话记忆")
+
+
+def test_new_write_request_replaces_pickup_task_instead_of_reusing_old_case(tmp_path):
+    agent, tools, _ = runtime(tmp_path)
+    created = agent.handle_message("thread-memory-new-task", "U001", "帮我退 O1001", "memory-new-task-1")
+    agent.resolve_confirmation(created["confirmation_id"], "U001", True)
+    replacement = agent.handle_message("thread-memory-new-task", "U001", "帮我退 O1002", "memory-new-task-2")
+    assert replacement["status"] == "awaiting_confirmation"
+    assert replacement["memory"]["intent"] == "create_after_sales"
+    assert replacement["memory"]["case_id"] == 42
+    assert [call[0] for call in tools.calls].count("create_case") == 2

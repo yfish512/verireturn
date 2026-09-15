@@ -36,6 +36,17 @@ class AgentMessageResponse(BaseModel):
     ticket_id: str | None = None
     retrieval_id: str | None = None
     citations: list[str] = Field(default_factory=list)
+    memory: dict | None = None
+
+
+class AgentThreadCreateResponse(BaseModel):
+    thread_id: str
+
+
+class AgentThreadSnapshotResponse(BaseModel):
+    thread_id: str
+    messages: list[dict]
+    task: dict | None = None
 
 
 class ConfirmationRequest(BaseModel):

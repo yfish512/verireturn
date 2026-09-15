@@ -21,7 +21,7 @@ from backend.app.domain.knowledge import EMBEDDING_DIMENSIONS, create_document, 
 from backend.app.domain.service import DomainError, confirm_case, create_case, schedule_pickup
 from backend.app.domain.fulfillment import claim_one_outbox, receive_provider_event, replay_deferred_event
 from backend.app.domain.observability import claim_one_evaluation_run, create_evaluation_run, finish_evaluation_run, process_one_metric_job, publish_alert_rule_version, queue_metric_job
-from backend.app.models import AfterSalesCase, AlertRuleVersion, AuditLog, EvaluationResult, FulfillmentEvent, InboxEvent, KnowledgeDocumentVersion, PolicyVersion, ReviewEvent
+from backend.app.models import AgentTask, AgentTaskEvent, AgentThread, AfterSalesCase, AlertRuleVersion, AuditLog, EvaluationResult, FulfillmentEvent, InboxEvent, KnowledgeDocumentVersion, PolicyVersion, ReviewEvent
 from backend.app.schemas import AfterSalesCreateRequest, KnowledgeDocumentCreateRequest, PolicyVersionPublishRequest, ReviewTicketCreateRequest
 from backend.app.seed import seed_demo_data
 
@@ -415,4 +415,30 @@ def test_postgres_concurrent_alert_rule_publish_leaves_one_active_version(postgr
         assert sorted(version.version for version in versions) == [1, 2]
         assert len([version for version in versions if version.status == "published"]) == 1
         assert len([version for version in versions if version.status == "retired"]) == 1
+    engine.dispose()
+
+
+def test_postgres_agent_task_memory_events_are_append_only(postgres_url):
+    engine = create_engine(postgres_url)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as db:
+        seed_demo_data(db)
+        thread = AgentThread(id="postgres-memory-thread", actor_id="U001")
+        task = AgentTask(
+            id="postgres-memory-task", thread_id=thread.id, intent="create_after_sales", phase="collecting_slots",
+            slots_json={"request_type": "refund"}, missing_slots=["order_id"], version=1,
+        )
+        db.add(thread)
+        db.flush()
+        db.add(task)
+        db.flush()
+        event = AgentTaskEvent(
+            id="postgres-memory-event", task_id=task.id, sequence_no=1, event_type="task_created", payload_json={"intent": "create_after_sales"},
+        )
+        db.add(event)
+        db.commit()
+        event.event_type = "tampered"
+        with pytest.raises(DBAPIError):
+            db.commit()
+        db.rollback()
     engine.dispose()

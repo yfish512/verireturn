@@ -31,6 +31,8 @@ class AgentState(TypedDict, total=False):
     retrieval_id: str
     citations: list[str]
     final_response: str
+    intent_resolved: bool
+    last_error_code: str
 
 
 def _stable_key(state: AgentState, operation: str) -> str:
@@ -56,7 +58,7 @@ class AgentGraph:
                 state["run_id"], sequence, node, tool_name, arguments, None, request_id,
                 int((time.perf_counter() - started) * 1000), "failed", error.code,
             )
-            return None, {"tool_sequence": sequence, "final_response": f"业务系统拒绝了该操作：{error.message}（{error.code}）。"}
+            return None, {"tool_sequence": sequence, "last_error_code": error.code, "final_response": f"业务系统拒绝了该操作：{error.message}（{error.code}）。"}
         self.traces.record_tool_call(
             state["run_id"], sequence, node, tool_name, arguments, result, request_id,
             int((time.perf_counter() - started) * 1000), "succeeded",
@@ -64,13 +66,16 @@ class AgentGraph:
         return result, {"tool_sequence": sequence}
 
     def parse_intent(self, state: AgentState) -> dict:
+        # Normal turns are resolved by TaskMemory before graph execution.  The
+        # checkpoint therefore only resumes an interrupt and never supplies
+        # accidental slots from an earlier conversation turn.
+        if state.get("intent_resolved"):
+            return {"final_response": None, "confirmation_id": None, "retrieval_id": None, "citations": [], "last_error_code": None}
         try:
             decision = self.extractor.extract(state["message"])
         except Exception:
             return {"final_response": "暂时无法理解这条售后请求，请提供订单号和具体诉求。"}
-        # A checkpoint retains the prior turn's answer. Clear it before routing
-        # the next user message in the same thread.
-        return {**decision.model_dump(exclude_none=True), "final_response": None, "confirmation_id": None, "retrieval_id": None, "citations": []}
+        return {**decision.model_dump(exclude_none=True), "final_response": None, "confirmation_id": None, "retrieval_id": None, "citations": [], "last_error_code": None}
 
     def route_intent(self, state: AgentState) -> str:
         if state.get("final_response"):
@@ -145,7 +150,7 @@ class AgentGraph:
         # The model may summarize away evidence terms (for example “损坏”).
         # Policy routing must evaluate the immutable user input, not that
         # lossy summary; the model only chooses this bounded workflow.
-        reason = state["message"]
+        reason = state.get("reason") or state["message"]
         eligibility, update = self._call(
             state, "create_case", "check_after_sales_eligibility",
             {"order_id": state["order_id"], "request_type": state["request_type"]},
@@ -184,7 +189,7 @@ class AgentGraph:
             return {"final_response": "请说明您申请退款还是换货。"}
         if state.get("confirmation_id"):
             return {}
-        reason = state["message"]
+        reason = state.get("reason") or state["message"]
         confirmation = self.traces.create_review_confirmation(
             state["thread_id"], state["run_id"], state["actor_id"], state["order_id"], state["request_type"], reason,
         )
@@ -222,7 +227,7 @@ class AgentGraph:
         if not approved:
             self.traces.resolve_review_confirmation(state["confirmation_id"], False)
             return {"final_response": "已取消提交人工审核。"}
-        reason = state["message"]
+        reason = state.get("reason") or state["message"]
         ticket, update = self._call(
             state, "submit_review_ticket", "create_review_ticket",
             {"order_id": state["order_id"], "request_type": state["request_type"]},

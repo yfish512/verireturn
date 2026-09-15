@@ -655,3 +655,74 @@ class KnowledgeFeedback(Base):
     rating: Mapped[str] = mapped_column(String(16))
     reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AgentThread(Base):
+    """Customer-owned conversation container; IDs are never shared across actors."""
+
+    __tablename__ = "agent_threads"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    memory_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AgentMessageRecord(Base):
+    """Append-only conversation transcript with a client retry key on user turns."""
+
+    __tablename__ = "agent_message_records"
+    __table_args__ = (
+        CheckConstraint("role IN ('customer', 'agent')", name="ck_agent_message_record_role"),
+        UniqueConstraint("thread_id", "client_message_id", name="uq_agent_message_client_id"),
+        UniqueConstraint("thread_id", "sequence_no", name="uq_agent_message_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("agent_threads.id"), index=True)
+    sequence_no: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    client_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reply_to_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id"), nullable=True, index=True)
+    payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AgentTask(Base):
+    """The one explicit, customer-visible task currently active in a thread."""
+
+    __tablename__ = "agent_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "phase IN ('collecting_slots', 'ready_to_execute', 'awaiting_customer_confirmation', 'awaiting_pickup_slot', 'completed', 'cancelled', 'expired')",
+            name="ck_agent_task_phase",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("agent_threads.id"), unique=True)
+    intent: Mapped[str] = mapped_column(String(64))
+    phase: Mapped[str] = mapped_column(String(48), default="collecting_slots")
+    slots_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    missing_slots: Mapped[list] = mapped_column(JSON, default=list)
+    active_case_id: Mapped[int | None] = mapped_column(ForeignKey("after_sales_cases.id"), nullable=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class AgentTaskEvent(Base):
+    __tablename__ = "agent_task_events"
+    __table_args__ = (UniqueConstraint("task_id", "sequence_no", name="uq_agent_task_event_sequence"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("agent_tasks.id"), index=True)
+    sequence_no: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[dict] = mapped_column(JSON)
+    message_id: Mapped[str | None] = mapped_column(ForeignKey("agent_message_records.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
