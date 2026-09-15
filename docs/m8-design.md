@@ -50,3 +50,9 @@ stateDiagram-v2
 4. 确认后“明天上午取件” → 使用任务保存的售后单完成预约。
 5. 刷新 `/agent` → 从线程快照恢复对话和当前任务卡片。
 6. 另一客户读取同一 thread ID → 返回不存在，不泄漏对话或槽位。
+
+## M8 补齐：分页、放弃与崩溃恢复
+
+- `GET /agent/threads/{thread_id}` 使用 `before_sequence` 游标向前分页；默认 30 条、最大 100 条，并返回 `next_before_sequence`。当前任务始终随每一页返回。
+- `POST /agent/threads/{thread_id}/task/cancel` 可放弃补槽或取件任务。待确认申请复用确认拒绝命令，取消业务草稿；已确认后的取件任务只停止 Agent 后续安排，不撤销售后申请。
+- 业务确认成功后，确认记录会成为持久化事实。Runtime 启动时扫描“确认已批准、任务仍等待确认”的不一致投影，并将其修复为 `schedule_pickup / awaiting_pickup_slot`。恢复过程记录 `task_projection_recovered` 事件。

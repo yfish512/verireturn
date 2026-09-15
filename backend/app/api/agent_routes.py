@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..agent.runtime import AgentRuntime, AgentRuntimeError, get_agent_runtime
-from ..agent.schemas import AgentMessageRequest, AgentMessageResponse, AgentThreadCreateResponse, AgentThreadSnapshotResponse, AgentToolCallResponse, ConfirmationRequest
+from ..agent.schemas import AgentMessageRequest, AgentMessageResponse, AgentTaskCancelResponse, AgentThreadCreateResponse, AgentThreadSnapshotResponse, AgentToolCallResponse, ConfirmationRequest
 from ..auth import current_demo_user
 
 
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/agent", tags=["agent-runtime"])
 
 
 def runtime_error(error: AgentRuntimeError) -> HTTPException:
-    status = 404 if error.code in {"CONFIRMATION_NOT_FOUND", "THREAD_NOT_FOUND"} else 409 if error.code in {"CONFIRMATION_EXPIRED", "CONFIRMATION_ALREADY_RESOLVED"} else 500
+    status = 404 if error.code in {"CONFIRMATION_NOT_FOUND", "THREAD_NOT_FOUND"} else 409 if error.code in {"CONFIRMATION_EXPIRED", "CONFIRMATION_ALREADY_RESOLVED", "TASK_NOT_ACTIVE"} else 500
     return HTTPException(status_code=status, detail={"code": error.code, "message": error.message})
 
 
@@ -26,9 +26,11 @@ def read_agent_thread(
     thread_id: str,
     actor_id: str = Depends(current_demo_user),
     runtime: AgentRuntime = Depends(get_agent_runtime),
+    before_sequence: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
 ):
     try:
-        return runtime.thread_snapshot(thread_id, actor_id)
+        return runtime.thread_snapshot(thread_id, actor_id, before_sequence=before_sequence, limit=limit)
     except AgentRuntimeError as error:
         raise runtime_error(error) from error
 
@@ -42,6 +44,18 @@ def send_agent_message(
 ):
     try:
         return runtime.handle_message(thread_id, actor_id, request.message, request.message_id)
+    except AgentRuntimeError as error:
+        raise runtime_error(error) from error
+
+
+@router.post("/threads/{thread_id}/task/cancel", response_model=AgentTaskCancelResponse)
+def cancel_agent_task(
+    thread_id: str,
+    actor_id: str = Depends(current_demo_user),
+    runtime: AgentRuntime = Depends(get_agent_runtime),
+):
+    try:
+        return runtime.cancel_task(thread_id, actor_id)
     except AgentRuntimeError as error:
         raise runtime_error(error) from error
 

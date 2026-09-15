@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection } from "./types";
+import type { AgentMessage, AgentTaskCancelResult, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection } from "./types";
 
 const actorId = () => localStorage.getItem("verireturn.opsActor") || "OPS001";
 const idempotency = () => `ops-ui-${crypto.randomUUID()}`;
@@ -56,9 +56,18 @@ export const api = {
     method: "POST", body: JSON.stringify({ expected_version: incident.version, resolution_note: resolutionNote }),
   }),
   createAgentThread: (actor: string) => request<{ thread_id: string }>("/agent/threads", { method: "POST", headers: { "X-Demo-User-Id": actor } }),
-  agentThread: (actor: string, threadId: string) => request<AgentThreadSnapshot>(`/agent/threads/${threadId}`, { headers: { "X-Demo-User-Id": actor } }),
+  agentThread: (actor: string, threadId: string, options: { beforeSequence?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (options.beforeSequence) query.set("before_sequence", String(options.beforeSequence));
+    if (options.limit) query.set("limit", String(options.limit));
+    const suffix = query.size ? `?${query}` : "";
+    return request<AgentThreadSnapshot>(`/agent/threads/${threadId}${suffix}`, { headers: { "X-Demo-User-Id": actor } });
+  },
   agentMessage: (actor: string, threadId: string, message: string, messageId: string) => request<AgentMessage>(`/agent/threads/${threadId}/messages`, {
     method: "POST", headers: { "X-Demo-User-Id": actor }, body: JSON.stringify({ message, message_id: messageId }),
+  }),
+  cancelAgentTask: (actor: string, threadId: string) => request<AgentTaskCancelResult>(`/agent/threads/${threadId}/task/cancel`, {
+    method: "POST", headers: { "X-Demo-User-Id": actor },
   }),
   resolveAgentConfirmation: (actor: string, confirmationId: string, approved: boolean) => request<AgentMessage>(`/agent/confirmations/${confirmationId}`, {
     method: "POST", headers: { "X-Demo-User-Id": actor }, body: JSON.stringify({ approved }),

@@ -25,9 +25,13 @@ class FakeRuntime:
         self.calls.append(("create_thread", actor_id))
         return {"thread_id": "thread-created"}
 
-    def thread_snapshot(self, thread_id, actor_id):
-        self.calls.append(("snapshot", thread_id, actor_id))
-        return {"thread_id": thread_id, "messages": [], "task": None}
+    def thread_snapshot(self, thread_id, actor_id, *, before_sequence=None, limit=30):
+        self.calls.append(("snapshot", thread_id, actor_id, before_sequence, limit))
+        return {"thread_id": thread_id, "messages": [], "task": None, "next_before_sequence": None}
+
+    def cancel_task(self, thread_id, actor_id):
+        self.calls.append(("cancel_task", thread_id, actor_id))
+        return {"thread_id": thread_id, "response": "已放弃当前任务。", "task": None}
 
 
 def test_agent_http_contract_injects_actor_and_uses_structured_confirmation():
@@ -62,6 +66,9 @@ def test_agent_thread_endpoints_are_customer_scoped():
         snapshot = client.get("/agent/threads/thread-created", headers=headers)
         assert snapshot.status_code == 200
         assert snapshot.json()["messages"] == []
-        assert runtime.calls == [("create_thread", "U001"), ("snapshot", "thread-created", "U001")]
+        assert runtime.calls == [("create_thread", "U001"), ("snapshot", "thread-created", "U001", None, 30)]
+        cancelled = client.post("/agent/threads/thread-created/task/cancel", headers=headers)
+        assert cancelled.status_code == 200
+        assert runtime.calls[-1] == ("cancel_task", "thread-created", "U001")
     finally:
         app.dependency_overrides.clear()

@@ -72,6 +72,13 @@ export interface AgentThreadSnapshot {
   thread_id: string;
   messages: Array<{ id: string; role: "customer" | "agent"; content: string; payload: AgentMessage | null }>;
   task: AgentTaskMemory | null;
+  next_before_sequence: number | null;
+}
+
+export interface AgentTaskCancelResult {
+  thread_id: string;
+  response: string;
+  task: AgentTaskMemory | null;
 }
 
 export interface AgentToolCall {

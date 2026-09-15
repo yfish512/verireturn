@@ -47,6 +47,13 @@ class AgentThreadSnapshotResponse(BaseModel):
     thread_id: str
     messages: list[dict]
     task: dict | None = None
+    next_before_sequence: int | None = None
+
+
+class AgentTaskCancelResponse(BaseModel):
+    thread_id: str
+    response: str
+    task: dict | None = None
 
 
 class ConfirmationRequest(BaseModel):

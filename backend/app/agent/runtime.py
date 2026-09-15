@@ -55,11 +55,31 @@ class AgentRuntime:
         self.memory.ensure_thread(thread_id, actor_id)
         return {"thread_id": thread_id}
 
-    def thread_snapshot(self, thread_id: str, actor_id: str) -> dict:
+    def thread_snapshot(self, thread_id: str, actor_id: str, *, before_sequence: int | None = None, limit: int = 30) -> dict:
         try:
-            return self.memory.snapshot(thread_id, actor_id)
+            return self.memory.snapshot(thread_id, actor_id, before_sequence=before_sequence, limit=limit)
         except ThreadAccessError as error:
             raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
+
+    def reconcile(self) -> int:
+        return self.memory.reconcile_confirmed_after_sales()
+
+    def cancel_task(self, thread_id: str, actor_id: str) -> dict:
+        pending = self.traces.get_pending_confirmation(thread_id, actor_id)
+        if pending is not None:
+            resolved = self.resolve_confirmation(pending.id, actor_id, False)
+            return {"thread_id": thread_id, "response": "已取消本次申请。", "task": resolved.get("memory")}
+        pending_review = self.traces.get_pending_review_confirmation(thread_id, actor_id)
+        if pending_review is not None:
+            resolved = self.resolve_confirmation(pending_review.id, actor_id, False)
+            return {"thread_id": thread_id, "response": "已取消当前人工审核申请。", "task": resolved.get("memory")}
+        try:
+            task = self.memory.cancel_task(thread_id, actor_id)
+        except ThreadAccessError as error:
+            raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
+        if task is None:
+            raise AgentRuntimeError("TASK_NOT_ACTIVE", "当前没有可取消的任务。")
+        return {"thread_id": thread_id, "response": "已放弃当前任务。", "task": task}
 
     @staticmethod
     def _response(thread_id: str, run_id: str, status: str, response: str, *, confirmation_id=None, case_id=None, ticket_id=None, retrieval_id=None, citations=None, memory=None, last_error_code=None) -> dict:
@@ -73,6 +93,10 @@ class AgentRuntime:
         return result
 
     def handle_message(self, thread_id: str, actor_id: str, message: str, message_id: str | None = None) -> dict:
+        with self.memory.execution_lock(thread_id):
+            return self._handle_message(thread_id, actor_id, message, message_id)
+
+    def _handle_message(self, thread_id: str, actor_id: str, message: str, message_id: str | None = None) -> dict:
         message_id = message_id or str(uuid4())
         try:
             record_id, replay = self.memory.start_message(thread_id, actor_id, message, message_id)
@@ -141,6 +165,15 @@ class AgentRuntime:
     def resolve_confirmation(self, confirmation_id: str, actor_id: str, approved: bool) -> dict:
         confirmation = self.traces.get_confirmation(confirmation_id, actor_id)
         review_confirmation = None if confirmation is not None else self.traces.get_review_confirmation(confirmation_id, actor_id)
+        active_confirmation = confirmation or review_confirmation
+        if active_confirmation is None:
+            raise AgentRuntimeError("CONFIRMATION_NOT_FOUND", "确认请求不存在或不属于当前用户。")
+        with self.memory.execution_lock(active_confirmation.thread_id):
+            return self._resolve_confirmation(confirmation_id, actor_id, approved)
+
+    def _resolve_confirmation(self, confirmation_id: str, actor_id: str, approved: bool) -> dict:
+        confirmation = self.traces.get_confirmation(confirmation_id, actor_id)
+        review_confirmation = None if confirmation is not None else self.traces.get_review_confirmation(confirmation_id, actor_id)
         if confirmation is None and review_confirmation is None:
             raise AgentRuntimeError("CONFIRMATION_NOT_FOUND", "确认请求不存在或不属于当前用户。")
         active_confirmation = confirmation or review_confirmation
@@ -195,7 +228,9 @@ def build_agent_runtime(
         else:
             checkpointer = MemorySaver()
     graph = AgentGraph(extractor, tools, traces, knowledge_service).build(checkpointer)
-    return AgentRuntime(graph, traces, extractor, TaskMemory(session_factory), resource_stack)
+    runtime = AgentRuntime(graph, traces, extractor, TaskMemory(session_factory), resource_stack)
+    runtime.reconcile()
+    return runtime
 
 
 @lru_cache(maxsize=1)

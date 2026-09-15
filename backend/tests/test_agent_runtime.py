@@ -1,5 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -204,6 +206,24 @@ def test_confirmation_cannot_be_resolved_by_another_user(tmp_path):
     assert "confirm_case" not in [call[0] for call in tools.calls]
 
 
+
+def test_concurrent_confirmation_is_serialized_to_one_business_write(tmp_path):
+    agent, tools, _ = runtime(tmp_path)
+    created = agent.handle_message("thread-confirm-lock", "U001", "帮我退 O1001", "confirm-lock-1")
+
+    def confirm_once(_: int):
+        try:
+            return agent.resolve_confirmation(created["confirmation_id"], "U001", True)["status"]
+        except Exception as error:
+            return getattr(error, "code", type(error).__name__)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(confirm_once, range(2)))
+
+    assert outcomes.count("completed") == 1
+    assert outcomes.count("CONFIRMATION_ALREADY_RESOLVED") == 1
+    assert [call[0] for call in tools.calls].count("confirm_case") == 1
+
 def test_rejected_confirmation_calls_cancel_instead_of_confirm(tmp_path):
     agent, tools, sessions = runtime(tmp_path)
     created = agent.handle_message("thread-reject-1", "U001", "帮我退 O1001", "message-reject-1")
@@ -371,6 +391,65 @@ def test_agent_recovers_legacy_completed_refund_task_when_customer_corrects_orde
         ("check_eligibility", "U001", "O1001"),
         ("create_case", "U001", "O1001"),
     ]
+
+
+def test_thread_snapshot_pages_history_in_sequence_order(tmp_path):
+    agent, _, _ = runtime(tmp_path)
+    for index in range(4):
+        agent.handle_message("thread-page", "U001", f"帮我退，没拆封 {index}", f"page-message-{index}")
+
+    latest = agent.thread_snapshot("thread-page", "U001", limit=3)
+    assert len(latest["messages"]) == 3
+    assert latest["next_before_sequence"] == 6
+    assert [item["content"] for item in latest["messages"]] == [
+        "可以，请提供订单号，例如 O1001。", "帮我退，没拆封 3", "可以，请提供订单号，例如 O1001。",
+    ]
+
+    older = agent.thread_snapshot("thread-page", "U001", before_sequence=latest["next_before_sequence"], limit=3)
+    assert len(older["messages"]) == 3
+    assert older["next_before_sequence"] == 3
+    assert [item["content"] for item in older["messages"]] == [
+        "帮我退，没拆封 1", "可以，请提供订单号，例如 O1001。", "帮我退，没拆封 2",
+    ]
+
+
+def test_customer_can_abandon_slot_collection_without_business_write(tmp_path):
+    agent, tools, _ = runtime(tmp_path)
+    agent.handle_message("thread-cancel-task", "U001", "帮我退，没拆封", "cancel-task-1")
+
+    result = agent.cancel_task("thread-cancel-task", "U001")
+
+    assert result["response"] == "已放弃当前任务。"
+    assert result["task"]["phase"] == "cancelled"
+    assert tools.calls == []
+    with pytest.raises(Exception) as error:
+        agent.cancel_task("thread-cancel-task", "U001")
+    assert getattr(error.value, "code") == "TASK_NOT_ACTIVE"
+
+
+def test_restart_recovers_pickup_task_after_confirmation_succeeds_but_memory_write_crashes(tmp_path):
+    agent, tools, sessions = runtime(tmp_path)
+    created = agent.handle_message("thread-crash-recover", "U001", "帮我退 O1001，没拆封", "crash-recover-1")
+    original_finish = agent.memory.finish_confirmation
+
+    def crash_after_business_confirmation(*_args, **_kwargs):
+        raise RuntimeError("simulated memory write crash")
+
+    agent.memory.finish_confirmation = crash_after_business_confirmation
+    with pytest.raises(RuntimeError, match="simulated memory write crash"):
+        agent.resolve_confirmation(created["confirmation_id"], "U001", True)
+    agent.memory.finish_confirmation = original_finish
+    assert [call[0] for call in tools.calls] == ["check_eligibility", "create_case", "confirm_case"]
+
+    restarted = build_agent_runtime(
+        settings=AgentSettings(agent_service_url="http://unused"), session_factory=sessions, tools=tools,
+        extractor=KeywordIntentExtractor(), checkpointer=MemorySaver(),
+    )
+    snapshot = restarted.thread_snapshot("thread-crash-recover", "U001")
+    assert snapshot["task"]["intent"] == "schedule_pickup"
+    assert snapshot["task"]["phase"] == "awaiting_pickup_slot"
+    assert snapshot["task"]["missing_slots"] == ["time_slot"]
+    assert snapshot["task"]["case_id"] == 42
 
 def test_agent_thread_memory_is_owned_by_the_customer(tmp_path):
     agent, _, _ = runtime(tmp_path)

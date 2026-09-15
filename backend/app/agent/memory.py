@@ -5,20 +5,25 @@ customer-facing task: its slots, lifecycle and append-only history.
 """
 from __future__ import annotations
 
+import hashlib
 import re
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable
+from threading import Lock, RLock
+from typing import Any, Callable, Iterator
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import AgentMessageRecord, AgentTask, AgentTaskEvent, AgentThread
+from ..models import AgentConfirmation, AgentMessageRecord, AgentTask, AgentTaskEvent, AgentThread
 from .schemas import IntentDecision
 
 _WRITE_INTENTS = {"create_after_sales", "request_manual_review"}
 _SLOT_LABELS = {"order_id": "订单号", "request_type": "售后类型", "case_id": "售后单编号", "time_slot": "取件时段"}
+_LOCAL_LOCK_GUARD = Lock()
+_LOCAL_THREAD_LOCKS: dict[str, RLock] = {}
 
 
 class ThreadAccessError(Exception):
@@ -28,6 +33,32 @@ class ThreadAccessError(Exception):
 class TaskMemory:
     def __init__(self, session_factory: Callable[[], Session]):
         self.session_factory = session_factory
+
+    @staticmethod
+    def _lock_key(thread_id: str) -> int:
+        return int.from_bytes(hashlib.blake2b(thread_id.encode(), digest_size=8).digest(), "big", signed=True)
+
+    @contextmanager
+    def execution_lock(self, thread_id: str) -> Iterator[None]:
+        """Serialize commands for one thread across API workers.
+
+        PostgreSQL uses a session-level advisory lock held through the full
+        agent turn. SQLite tests use a process-local equivalent.
+        """
+        with self.session_factory() as db:
+            if db.get_bind().dialect.name == "postgresql":
+                key = self._lock_key(thread_id)
+                db.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
+                try:
+                    yield
+                finally:
+                    db.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+                    db.commit()
+                return
+        with _LOCAL_LOCK_GUARD:
+            lock = _LOCAL_THREAD_LOCKS.setdefault(thread_id, RLock())
+        with lock:
+            yield
 
     @staticmethod
     def _next_sequence(db: Session, model, column, filter_column, value: str) -> int:
@@ -283,15 +314,79 @@ class TaskMemory:
                 return None
             return {"active_task": active_task, "recent_turns": recent_turns}
 
-    def snapshot(self, thread_id: str, actor_id: str) -> dict:
+    def cancel_task(self, thread_id: str, actor_id: str) -> dict | None:
+        """Stop an unfinished local task without changing confirmed business state."""
+        with self.session_factory() as db:
+            task = db.scalar(
+                select(AgentTask).join(AgentThread).where(
+                    AgentTask.thread_id == thread_id, AgentThread.actor_id == actor_id
+                ).with_for_update()
+            )
+            if task is None or task.phase in {"completed", "cancelled", "expired"}:
+                return None
+            if task.phase == "awaiting_customer_confirmation":
+                # The runtime must reject the durable confirmation command so
+                # the pending business draft is cancelled too.
+                return self._projection(task)
+            task.phase, task.missing_slots = "cancelled", []
+            task.version += 1
+            self._event(db, task, "task_cancelled_by_customer", {}, None)
+            db.commit()
+            return self._projection(task)
+
+    def reconcile_confirmed_after_sales(self) -> int:
+        """Repair task projection after a crash between business confirmation and memory update."""
+        with self.session_factory() as db:
+            tasks = list(db.scalars(
+                select(AgentTask)
+                .join(AgentConfirmation, AgentConfirmation.thread_id == AgentTask.thread_id)
+                .where(
+                    AgentTask.intent == "create_after_sales",
+                    AgentTask.phase == "awaiting_customer_confirmation",
+                    AgentConfirmation.status == "approved",
+                )
+                .with_for_update()
+            ))
+            repaired = 0
+            for task in tasks:
+                confirmation = db.scalar(
+                    select(AgentConfirmation).where(
+                        AgentConfirmation.thread_id == task.thread_id,
+                        AgentConfirmation.status == "approved",
+                    ).order_by(AgentConfirmation.resolved_at.desc())
+                )
+                if confirmation is None:
+                    continue
+                slots = dict(task.slots_json)
+                slots["case_id"], slots["time_slot"] = confirmation.case_id, None
+                task.intent = "schedule_pickup"
+                task.phase = "awaiting_pickup_slot"
+                task.missing_slots = ["time_slot"]
+                task.active_case_id = confirmation.case_id
+                task.slots_json = slots
+                task.version += 1
+                self._event(db, task, "task_projection_recovered", {"confirmation_id": confirmation.id, "case_id": confirmation.case_id}, None)
+                repaired += 1
+            if repaired:
+                db.commit()
+            return repaired
+
+    def snapshot(self, thread_id: str, actor_id: str, *, before_sequence: int | None = None, limit: int = 30) -> dict:
         with self.session_factory() as db:
             thread = db.get(AgentThread, thread_id)
             if thread is None or thread.actor_id != actor_id:
                 raise ThreadAccessError("会话不存在或不属于当前客户。")
-            messages = list(db.scalars(select(AgentMessageRecord).where(AgentMessageRecord.thread_id == thread_id).order_by(AgentMessageRecord.sequence_no)))
+            statement = select(AgentMessageRecord).where(AgentMessageRecord.thread_id == thread_id)
+            if before_sequence is not None:
+                statement = statement.where(AgentMessageRecord.sequence_no < before_sequence)
+            newest_first = list(db.scalars(statement.order_by(AgentMessageRecord.sequence_no.desc()).limit(limit + 1)))
+            has_more = len(newest_first) > limit
+            rows = newest_first[:limit]
+            rows.reverse()
             task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id))
             return {
                 "thread_id": thread_id,
-                "messages": [{"id": row.id, "role": row.role, "content": row.content, "payload": row.payload_json} for row in messages],
+                "messages": [{"id": row.id, "role": row.role, "content": row.content, "payload": row.payload_json} for row in rows],
                 "task": self._projection(task),
+                "next_before_sequence": rows[0].sequence_no if has_more and rows else None,
             }
