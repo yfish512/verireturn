@@ -810,3 +810,43 @@ class PaymentReconciliationItem(Base):
     provider_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+    __table_args__ = (UniqueConstraint("order_id", "sku", name="uq_order_item_sku"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), index=True)
+    sku: Mapped[str] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(String(128))
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    refunded_quantity: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AfterSalesItem(Base):
+    __tablename__ = "after_sales_items"
+    __table_args__ = (UniqueConstraint("case_id", "order_item_id", name="uq_after_sales_case_item"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
+    order_item_id: Mapped[str] = mapped_column(ForeignKey("order_items.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    refund_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+
+class InventoryStock(Base):
+    __tablename__ = "inventory_stock"
+    sku: Mapped[str] = mapped_column(String(64), primary_key=True)
+    available_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    reserved_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class InventoryReservation(Base):
+    __tablename__ = "inventory_reservations"
+    __table_args__ = (UniqueConstraint("case_id", name="uq_inventory_reservation_case"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
+    sku: Mapped[str] = mapped_column(String(64), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="reserved")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
