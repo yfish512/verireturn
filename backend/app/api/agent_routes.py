@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..agent.runtime import AgentRuntime, AgentRuntimeError, get_agent_runtime
-from ..agent.schemas import AgentMessageRequest, AgentMessageResponse, AgentTaskCancelResponse, AgentThreadCreateResponse, AgentThreadSnapshotResponse, AgentToolCallResponse, ConfirmationRequest
+from ..agent.schemas import AgentMessageRequest, AgentMessageResponse, AgentTaskCancelResponse, AgentThreadCreateResponse, AgentThreadSnapshotResponse, AgentToolCallResponse, ConfirmationRequest, AgentTaskFocusRequest, AgentTaskResponse
 from ..auth import current_demo_user
 
 
@@ -44,6 +44,30 @@ def send_agent_message(
 ):
     try:
         return runtime.handle_message(thread_id, actor_id, request.message, request.message_id)
+    except AgentRuntimeError as error:
+        raise runtime_error(error) from error
+
+
+@router.get("/threads/{thread_id}/tasks", response_model=list[dict])
+def list_agent_tasks(thread_id: str, actor_id: str = Depends(current_demo_user), runtime: AgentRuntime = Depends(get_agent_runtime)):
+    try:
+        return runtime.list_tasks(thread_id, actor_id)
+    except AgentRuntimeError as error:
+        raise runtime_error(error) from error
+
+
+@router.post("/threads/{thread_id}/tasks/{task_id}/focus", response_model=AgentTaskResponse)
+def focus_agent_task(thread_id: str, task_id: str, request: AgentTaskFocusRequest, actor_id: str = Depends(current_demo_user), runtime: AgentRuntime = Depends(get_agent_runtime)):
+    try:
+        return {"task": runtime.focus_task(thread_id, actor_id, task_id, restore=request.restore)}
+    except AgentRuntimeError as error:
+        raise runtime_error(error) from error
+
+
+@router.post("/threads/{thread_id}/tasks/{task_id}/archive", response_model=AgentTaskResponse)
+def archive_agent_task(thread_id: str, task_id: str, actor_id: str = Depends(current_demo_user), runtime: AgentRuntime = Depends(get_agent_runtime)):
+    try:
+        return {"task": runtime.archive_task(thread_id, actor_id, task_id)}
     except AgentRuntimeError as error:
         raise runtime_error(error) from error
 

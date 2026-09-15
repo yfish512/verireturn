@@ -198,3 +198,7 @@ apt-get install -y uidmap
 ```
 
 随后为运行 Docker 的用户配置 `/etc/subuid`、`/etc/subgid`，按 Docker 官方 rootless 安装流程启动 daemon，并设置该 daemon 对应的 `DOCKER_HOST`。先执行 `docker compose config --quiet`，再执行 `docker compose up --build -d`。
+
+## P0–P2：生产化可靠性
+
+订单行部分退款、库存换货预占、支付退款 Outbox/验签回调/对账、多任务记忆、审核材料、JWT RBAC、限流与隐私数据权利已经接入同一条售后链路。实现边界、恢复语义和安全配置见 [P0–P2 可靠售后闭环](docs/p0-p2-production.md)。

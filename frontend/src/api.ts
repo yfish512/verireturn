@@ -66,6 +66,9 @@ export const api = {
   agentMessage: (actor: string, threadId: string, message: string, messageId: string) => request<AgentMessage>(`/agent/threads/${threadId}/messages`, {
     method: "POST", headers: { "X-Demo-User-Id": actor }, body: JSON.stringify({ message, message_id: messageId }),
   }),
+  agentTasks: (actor: string, threadId: string) => request<AgentTaskMemory[]>(`/agent/threads/${threadId}/tasks`, { headers: { "X-Demo-User-Id": actor } }),
+  focusAgentTask: (actor: string, threadId: string, taskId: string, restore = false) => request<{task: AgentTaskMemory}>(`/agent/threads/${threadId}/tasks/${taskId}/focus`, { method: "POST", headers: { "X-Demo-User-Id": actor }, body: JSON.stringify({ restore }) }),
+  archiveAgentTask: (actor: string, threadId: string, taskId: string) => request<{task: AgentTaskMemory}>(`/agent/threads/${threadId}/tasks/${taskId}/archive`, { method: "POST", headers: { "X-Demo-User-Id": actor } }),
   cancelAgentTask: (actor: string, threadId: string) => request<AgentTaskCancelResult>(`/agent/threads/${threadId}/task/cancel`, {
     method: "POST", headers: { "X-Demo-User-Id": actor },
   }),

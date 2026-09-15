@@ -24,7 +24,8 @@ def ensure_refund_intent(db: Session, case: AfterSalesCase) -> RefundIntent:
         db.add(transaction); db.flush()
     if Decimal(transaction.amount) < Decimal(case.eligible_amount): raise DomainError("REFUND_AMOUNT_EXCEEDS_CAPTURE", "退款金额超过原支付金额。", 409)
     intent = RefundIntent(id=str(uuid4()), case_id=case.id, payment_transaction_id=transaction.id, amount=case.eligible_amount, provider=transaction.provider, idempotency_key=f"refund-case-{case.id}", status="pending")
-    db.add(intent); _audit(db, case.id, "REFUND_INTENT_CREATED", f"退款意图 {intent.id} 已创建，等待支付渠道提交。", "system", "payment-ledger", intent.id)
+    db.add(intent); db.flush(); enqueue_refund_submission(db, intent)
+    _audit(db, case.id, "REFUND_INTENT_CREATED", f"退款意图 {intent.id} 已创建，等待支付渠道提交。", "system", "payment-ledger", intent.id)
     return intent
 
 def submit_refund(db: Session, intent_id: str) -> RefundIntent:
@@ -53,15 +54,20 @@ def apply_refund_settlement(db: Session, provider: str, provider_refund_id: str,
         db.add(RefundAttempt(id=str(uuid4()), refund_intent_id=intent.id, attempt_no=attempt, status=intent.status, provider_response={"event_id": event_id}))
         case = db.get(AfterSalesCase, intent.case_id); transaction = db.get(PaymentTransaction, intent.payment_transaction_id); assert case and transaction
         if succeeded:
-            case.status, case.completed_at, transaction.status = "completed", datetime.now(timezone.utc), "refunded"
+            case.status, case.completed_at = "completed", datetime.now(timezone.utc)
             for line in db.scalars(select(AfterSalesItem).where(AfterSalesItem.case_id == case.id)):
                 order_item = db.scalar(select(OrderItem).where(OrderItem.id == line.order_item_id).with_for_update())
                 assert order_item is not None
                 if order_item.refunded_quantity + line.quantity > order_item.quantity:
                     raise DomainError("REFUND_QUANTITY_EXCEEDED", "退款数量超过订单商品数量。", 409)
                 order_item.refunded_quantity += line.quantity
+            refunded_total = db.scalar(select(func.coalesce(func.sum(RefundIntent.amount), 0)).where(RefundIntent.payment_transaction_id == transaction.id, RefundIntent.status == "succeeded")) or 0
+            transaction.status = "refunded" if Decimal(refunded_total) >= Decimal(transaction.amount) else "partially_refunded"
             _audit(db, case.id, "REFUND_SETTLED", "支付渠道确认退款成功。", "internal_service", provider, event_id)
-        else: _audit(db, case.id, "REFUND_FAILED", "支付渠道返回退款失败，等待运营处理。", "internal_service", provider, event_id)
+        else:
+            from .fulfillment import _create_incident
+            _create_incident(db, case.id, "PAYMENT_REFUND_FAILED", "支付渠道返回退款失败，等待财务处理。", f"payment-failed:{intent.id}")
+            _audit(db, case.id, "REFUND_FAILED", "支付渠道返回退款失败，等待运营处理。", "internal_service", provider, event_id)
     db.commit(); return intent
 
 def reconcile_refunds(db: Session, provider: str, provider_statuses: dict[str, str]) -> PaymentReconciliationRun:
@@ -70,4 +76,61 @@ def reconcile_refunds(db: Session, provider: str, provider_statuses: dict[str, s
         remote = provider_statuses.get(intent.provider_refund_id or "")
         status = "matched" if remote == intent.status else "missing_at_provider" if remote is None else "status_mismatch"
         db.add(PaymentReconciliationItem(id=str(uuid4()), run_id=run.id, refund_intent_id=intent.id, status=status, provider_status=remote, detail=None if status == "matched" else "渠道与本地退款状态不一致。"))
+        if status != "matched":
+            from .fulfillment import _create_incident
+            case = db.get(AfterSalesCase, intent.case_id)
+            if case is not None: _create_incident(db, case.id, "PAYMENT_RECONCILIATION_DIFF", f"退款对账差异：{status}", f"payment-reconcile:{run.id}:{intent.id}")
     db.commit(); return run
+
+# Provider boundary: the worker only submits an intent; settlement always arrives
+# through a separately verified callback or reconciliation read.
+class PaymentProvider:
+    def request_refund(self, payload: dict, idempotency_key: str) -> dict: raise NotImplementedError
+    def get_refund_statuses(self) -> dict[str, str]: raise NotImplementedError
+
+class SimulatorPaymentProvider(PaymentProvider):
+    def __init__(self): self.statuses: dict[str, str] = {}
+    def request_refund(self, payload: dict, idempotency_key: str) -> dict:
+        provider_refund_id = f"demo-refund-{payload['intent_id']}"
+        self.statuses.setdefault(provider_refund_id, "submitted")
+        return {"provider_refund_id": provider_refund_id, "accepted": True}
+    def get_refund_statuses(self) -> dict[str, str]: return dict(self.statuses)
+
+def enqueue_refund_submission(db: Session, intent: RefundIntent) -> None:
+    from .fulfillment import enqueue_outbox
+    enqueue_outbox(db, aggregate_type="refund_intent", aggregate_id=intent.id, event_type="refund.requested", destination="payment_provider", payload={"intent_id": intent.id, "amount": str(intent.amount), "currency": intent.currency}, idempotency_key=intent.idempotency_key)
+
+def submit_refund_provider(db: Session, intent_id: str, provider: PaymentProvider | None = None) -> RefundIntent:
+    """Worker command; durable attempt is recorded before acknowledging delivery."""
+    provider = provider or SimulatorPaymentProvider()
+    intent = db.scalar(select(RefundIntent).where(RefundIntent.id == intent_id).with_for_update())
+    if intent is None: raise DomainError("REFUND_INTENT_NOT_FOUND", "退款意图不存在。", 404)
+    if intent.status == "succeeded": return intent
+    response = provider.request_refund({"intent_id": intent.id, "amount": str(intent.amount), "currency": intent.currency}, intent.idempotency_key)
+    if not response.get("accepted") or not response.get("provider_refund_id"):
+        raise DomainError("PAYMENT_PROVIDER_REJECTED", "支付渠道拒绝退款提交。", 502)
+    # same state/attempt semantics as the legacy call, with provider reference supplied by adapter.
+    attempt = int(db.scalar(select(func.max(RefundAttempt.attempt_no)).where(RefundAttempt.refund_intent_id == intent.id)) or 0) + 1
+    intent.status, intent.provider_refund_id, intent.failure_code = "submitted", str(response["provider_refund_id"]), None
+    case = db.get(AfterSalesCase, intent.case_id); assert case is not None
+    case.status = "refund_processing"
+    db.add(RefundAttempt(id=str(uuid4()), refund_intent_id=intent.id, attempt_no=attempt, status="submitted", provider_response=response))
+    _audit(db, case.id, "REFUND_SUBMITTED", "退款请求已提交支付渠道。", "internal_service", intent.provider, intent.id)
+    db.commit(); return intent
+
+def reconcile_provider(db: Session, provider_name: str, provider: PaymentProvider | None = None) -> PaymentReconciliationRun:
+    provider = provider or SimulatorPaymentProvider()
+    return reconcile_refunds(db, provider_name, provider.get_refund_statuses())
+
+def retry_refund_submission(db: Session, intent_id: str, actor_id: str) -> RefundIntent:
+    """Finance retry creates a new durable command; it never reuses a delivered outbox row."""
+    from .fulfillment import enqueue_outbox
+    intent = db.scalar(select(RefundIntent).where(RefundIntent.id == intent_id).with_for_update())
+    if intent is None: raise DomainError("REFUND_INTENT_NOT_FOUND", "退款意图不存在。", 404)
+    if intent.status not in {"failed", "pending"}: raise DomainError("REFUND_RETRY_NOT_ALLOWED", "当前退款状态不能重试。", 409)
+    attempt = int(db.scalar(select(func.max(RefundAttempt.attempt_no)).where(RefundAttempt.refund_intent_id == intent.id)) or 0) + 1
+    intent.status, intent.failure_code = "pending", None
+    enqueue_outbox(db, aggregate_type="refund_intent", aggregate_id=intent.id, event_type="refund.requested", destination="payment_provider", payload={"intent_id":intent.id,"amount":str(intent.amount),"currency":intent.currency,"retry_attempt":attempt}, idempotency_key=f"{intent.idempotency_key}:retry:{attempt}")
+    case=db.get(AfterSalesCase,intent.case_id); assert case is not None
+    _audit(db,case.id,"REFUND_RETRY_REQUESTED",f"财务人员 {actor_id} 请求第 {attempt} 次退款投递。","finance",actor_id,intent.id)
+    db.commit(); return intent

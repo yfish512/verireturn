@@ -8,6 +8,7 @@ from ..database import get_db
 from ..domain.review_service import (
     claim_review_ticket,
     create_review_ticket,
+    attach_review_evidence,
     decide_review_ticket,
     get_owned_review_ticket,
     get_review_ticket,
@@ -22,6 +23,7 @@ from ..domain.ops_metrics import review_metrics
 from ..schemas import (
     ReviewClaimRequest,
     ReviewDecisionRequest,
+    ReviewAttachmentRequest, ReviewAttachmentResponse,
     ReviewEventResponse,
     OpsMetricsResponse,
     PolicyVersionPublishRequest,

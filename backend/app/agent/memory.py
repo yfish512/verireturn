@@ -136,6 +136,20 @@ class TaskMemory:
         return []
 
     @staticmethod
+    def _focused_task(db: Session, thread: AgentThread, *, lock: bool = False) -> AgentTask | None:
+        statement = select(AgentTask).where(AgentTask.thread_id == thread.id)
+        if thread.focus_task_id:
+            statement = statement.where(AgentTask.id == thread.focus_task_id)
+        else:
+            statement = statement.where(AgentTask.archived_at.is_(None)).order_by(AgentTask.updated_at.desc())
+        if lock:
+            statement = statement.with_for_update()
+        task = db.scalar(statement)
+        if task is not None and thread.focus_task_id is None:
+            thread.focus_task_id = task.id
+        return task
+
+    @staticmethod
     def _projection(task: AgentTask | None) -> dict | None:
         if task is None:
             return None
@@ -167,8 +181,15 @@ class TaskMemory:
             thread = db.get(AgentThread, thread_id)
             if thread is None or thread.actor_id != actor_id:
                 raise ThreadAccessError("会话不存在或不属于当前客户。")
-            task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id).with_for_update())
+            task = self._focused_task(db, thread, lock=True)
             raw_order = self._extract_order(message)
+            active_tasks = list(db.scalars(select(AgentTask).where(
+                AgentTask.thread_id == thread_id, AgentTask.archived_at.is_(None),
+                AgentTask.phase.notin_(("completed", "cancelled", "expired")),
+            )))
+            if len(active_tasks) > 1 and decision.intent in (_WRITE_INTENTS | {"schedule_pickup"}) and not (raw_order or decision.order_id or decision.case_id):
+                choices = "、".join(f"{item.intent}（任务 {item.id[:8]}）" for item in active_tasks[:3])
+                return {"reply": f"当前有多个进行中的任务：{choices}。请提供订单号或先在任务列表中切换。", "task": self._projection(task)}
             is_order_correction = bool(
                 task and task.intent == "create_after_sales" and task.active_case_id is None
                 and task.phase == "completed" and raw_order is not None
@@ -181,6 +202,9 @@ class TaskMemory:
                 ))
             ))
             starts_new_task = decision.intent in _WRITE_INTENTS or decision.intent == "schedule_pickup"
+            # Repeated incomplete wording continues the focused task; a ready/other task starts a separate recoverable task.
+            if task is not None and task.phase == "collecting_slots" and task.intent == decision.intent and raw_order is None:
+                is_slot_reply = True
             if starts_new_task and not is_slot_reply:
                 if task is not None and task.phase == "awaiting_customer_confirmation":
                     return {"reply": "当前售后申请正等待您的确认。请先确认或取消后，再发起新的请求。", "task": self._projection(task)}
@@ -192,11 +216,14 @@ class TaskMemory:
                 if task is None:
                     task = AgentTask(id=str(uuid4()), thread_id=thread_id, intent=decision.intent, phase="collecting_slots", slots_json=slots, missing_slots=[], version=1)
                     db.add(task)
+                    thread.focus_task_id = task.id
                     self._event(db, task, "task_created", {"intent": decision.intent, "slots": slots}, message_id)
                 else:
-                    task.intent, task.phase, task.slots_json, task.active_case_id = decision.intent, "collecting_slots", slots, decision.case_id
-                    task.version += 1
-                    self._event(db, task, "task_replaced", {"intent": decision.intent, "slots": slots}, message_id)
+                    # Preserve the old task as recoverable history and focus the new request.
+                    task = AgentTask(id=str(uuid4()), thread_id=thread_id, intent=decision.intent, phase="collecting_slots", slots_json=slots, missing_slots=[], version=1)
+                    db.add(task)
+                    thread.focus_task_id = task.id
+                    self._event(db, task, "task_created", {"intent": decision.intent, "slots": slots}, message_id)
             elif task is not None and (task.phase in {"collecting_slots", "awaiting_pickup_slot"} or is_order_correction):
                 slots = dict(task.slots_json)
                 changed: dict[str, Any] = {}
@@ -238,7 +265,8 @@ class TaskMemory:
     def finish_execution(self, thread_id: str, message_id: str, run_id: str, result: dict) -> tuple[dict, dict | None]:
         """Project graph output back into explicit memory and make recoverable errors non-terminal."""
         with self.session_factory() as db:
-            task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id).with_for_update())
+            thread = db.get(AgentThread, thread_id)
+            task = self._focused_task(db, thread, lock=True) if thread is not None else None
             if task is None:
                 return result, None
             slots = dict(task.slots_json)
@@ -268,7 +296,10 @@ class TaskMemory:
 
     def finish_confirmation(self, thread_id: str, actor_id: str, approved: bool, case_id: int | None) -> dict | None:
         with self.session_factory() as db:
-            task = db.scalar(select(AgentTask).join(AgentThread).where(AgentTask.thread_id == thread_id, AgentThread.actor_id == actor_id).with_for_update())
+            thread = db.get(AgentThread, thread_id)
+            if thread is None or thread.actor_id != actor_id:
+                raise ThreadAccessError("会话不存在或不属于当前客户。")
+            task = self._focused_task(db, thread, lock=True)
             if task is None:
                 return None
             if approved and case_id is not None and task.intent == "create_after_sales":
@@ -293,7 +324,7 @@ class TaskMemory:
             thread = db.get(AgentThread, thread_id)
             if thread is None or thread.actor_id != actor_id:
                 raise ThreadAccessError("会话不存在或不属于当前客户。")
-            task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id))
+            task = self._focused_task(db, thread)
             statement = select(AgentMessageRecord).where(AgentMessageRecord.thread_id == thread_id)
             if exclude_message_id:
                 statement = statement.where(AgentMessageRecord.id != exclude_message_id)
@@ -317,11 +348,10 @@ class TaskMemory:
     def cancel_task(self, thread_id: str, actor_id: str) -> dict | None:
         """Stop an unfinished local task without changing confirmed business state."""
         with self.session_factory() as db:
-            task = db.scalar(
-                select(AgentTask).join(AgentThread).where(
-                    AgentTask.thread_id == thread_id, AgentThread.actor_id == actor_id
-                ).with_for_update()
-            )
+            thread = db.get(AgentThread, thread_id)
+            if thread is None or thread.actor_id != actor_id:
+                raise ThreadAccessError("会话不存在或不属于当前客户。")
+            task = self._focused_task(db, thread, lock=True)
             if task is None or task.phase in {"completed", "cancelled", "expired"}:
                 return None
             if task.phase == "awaiting_customer_confirmation":
@@ -333,6 +363,43 @@ class TaskMemory:
             self._event(db, task, "task_cancelled_by_customer", {}, None)
             db.commit()
             return self._projection(task)
+
+    def append_control_reply(self, thread_id: str, response: dict) -> None:
+        """Persist confirmation/cancel controls which have no customer message to reply to."""
+        with self.session_factory() as db:
+            sequence = self._next_sequence(db, AgentMessageRecord, AgentMessageRecord.sequence_no, AgentMessageRecord.thread_id, thread_id)
+            db.add(AgentMessageRecord(id=str(uuid4()), thread_id=thread_id, sequence_no=sequence, role="agent", content=response["response"], run_id=response.get("run_id"), payload_json=response))
+            thread = db.get(AgentThread, thread_id)
+            if thread:
+                thread.memory_version += 1; thread.last_active_at = datetime.now(timezone.utc)
+            db.commit()
+
+    def list_tasks(self, thread_id: str, actor_id: str, include_archived: bool = True) -> list[dict]:
+        with self.session_factory() as db:
+            thread = db.get(AgentThread, thread_id)
+            if thread is None or thread.actor_id != actor_id: raise ThreadAccessError("会话不存在或不属于当前客户。")
+            statement = select(AgentTask).where(AgentTask.thread_id == thread_id)
+            if not include_archived: statement = statement.where(AgentTask.archived_at.is_(None))
+            return [self._projection(item) for item in db.scalars(statement.order_by(AgentTask.updated_at.desc()))]
+
+    def focus_task(self, thread_id: str, actor_id: str, task_id: str, *, restore: bool = False) -> dict:
+        with self.session_factory() as db:
+            thread = db.get(AgentThread, thread_id)
+            if thread is None or thread.actor_id != actor_id: raise ThreadAccessError("会话不存在或不属于当前客户。")
+            task = db.scalar(select(AgentTask).where(AgentTask.id == task_id, AgentTask.thread_id == thread_id).with_for_update())
+            if task is None: raise ThreadAccessError("任务不存在或不属于当前会话。")
+            if restore and task.archived_at is not None: task.archived_at = None; task.version += 1; self._event(db, task, "task_restored", {}, None)
+            thread.focus_task_id = task.id; thread.memory_version += 1; db.commit(); return self._projection(task)
+
+    def archive_task(self, thread_id: str, actor_id: str, task_id: str) -> dict:
+        with self.session_factory() as db:
+            thread = db.get(AgentThread, thread_id)
+            if thread is None or thread.actor_id != actor_id: raise ThreadAccessError("会话不存在或不属于当前客户。")
+            task = db.scalar(select(AgentTask).where(AgentTask.id == task_id, AgentTask.thread_id == thread_id).with_for_update())
+            if task is None: raise ThreadAccessError("任务不存在或不属于当前会话。")
+            task.archived_at = datetime.now(timezone.utc); task.version += 1; self._event(db, task, "task_archived", {}, None)
+            if thread.focus_task_id == task.id: thread.focus_task_id = None
+            db.commit(); return self._projection(task)
 
     def reconcile_confirmed_after_sales(self) -> int:
         """Repair task projection after a crash between business confirmation and memory update."""
@@ -383,10 +450,12 @@ class TaskMemory:
             has_more = len(newest_first) > limit
             rows = newest_first[:limit]
             rows.reverse()
-            task = db.scalar(select(AgentTask).where(AgentTask.thread_id == thread_id))
+            task = self._focused_task(db, thread)
+            tasks = list(db.scalars(select(AgentTask).where(AgentTask.thread_id == thread_id).order_by(AgentTask.updated_at.desc())))
             return {
                 "thread_id": thread_id,
                 "messages": [{"id": row.id, "role": row.role, "content": row.content, "payload": row.payload_json} for row in rows],
                 "task": self._projection(task),
+                "tasks": [self._projection(item) for item in tasks],
                 "next_before_sequence": rows[0].sequence_no if has_more and rows else None,
             }

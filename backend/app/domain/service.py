@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Callable
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -43,6 +44,18 @@ def get_owned_order(db: Session, user_id: str, order_id: str) -> Order:
     if order.user_id != user_id:
         raise DomainError("ORDER_ACCESS_DENIED", "无权查询或操作该订单。", 403)
     return order
+
+
+def list_order_items(db: Session, user_id: str, order_id: str) -> list[OrderItem]:
+    get_owned_order(db, user_id, order_id)
+    items = list(db.scalars(select(OrderItem).where(OrderItem.order_id == order_id).order_by(OrderItem.id)))
+    if items:
+        return items
+    # Explicit compatibility projection for old single-line demo orders.
+    order = db.get(Order, order_id); assert order is not None
+    item = OrderItem(id=str(uuid4()), order_id=order.id, sku=f"legacy-{order.id}", title=order.item_name, quantity=1, unit_amount=order.amount)
+    db.add(item); db.commit()
+    return [item]
 
 
 def get_logistics(db: Session, user_id: str, order_id: str) -> Logistics:
@@ -162,12 +175,29 @@ def create_case(
             db.add_all(candidates); db.flush()
         selected = request.items or ([type("Legacy", (), {"order_item_id": candidates[0].id, "quantity": 1})()] if len(candidates) == 1 else [])
         if not selected: raise DomainError("ORDER_ITEMS_REQUIRED", "该订单包含多个商品，请选择要售后的商品。", 422)
-        by_id = {item.id: item for item in candidates}
-        total = 0
+        # A concurrent request may have waited on the order-line lock after its first idempotency lookup.
+        concurrent = _existing_idempotent_case(db, user_id, operation, idempotency_key, payload_hash)
+        if concurrent is not None:
+            db.rollback()
+            return concurrent
+        by_id = {item.id: item for item in candidates}; seen: set[str] = set(); total = Decimal("0")
         for requested in selected:
+            if requested.order_item_id in seen:
+                raise DomainError("ORDER_ITEM_DUPLICATE", "同一商品只能选择一次。", 422)
+            seen.add(requested.order_item_id)
             item = by_id.get(requested.order_item_id)
-            if item is None or requested.quantity > item.quantity - item.refunded_quantity: raise DomainError("ORDER_ITEM_QUANTITY_INVALID", "商品不存在或可售后数量不足。", 422)
-            amount = item.unit_amount * requested.quantity; total += amount
+            if item is None:
+                raise DomainError("ORDER_ITEM_QUANTITY_INVALID", "商品不存在或不属于该订单。", 422)
+            processing = db.scalar(select(func.coalesce(func.sum(AfterSalesItem.quantity), 0)).join(AfterSalesCase, AfterSalesCase.id == AfterSalesItem.case_id).where(
+                AfterSalesItem.order_item_id == requested.order_item_id,
+                AfterSalesItem.case_id != case.id,
+                AfterSalesCase.status.in_((AWAITING_PICKUP, PICKUP_SCHEDULED, "picked_up", "return_received", "refund_processing", "replacement_shipped", MANUAL_REVIEW, "fulfillment_exception")),
+            )) or 0
+            available = item.quantity - item.refunded_quantity - int(processing)
+            if requested.quantity > available:
+                raise DomainError("ORDER_ITEM_QUANTITY_INVALID", "商品可售后数量不足。", 422)
+            # unit_amount is the centrally calculated post-discount line allocation; service never trusts caller money.
+            amount = Decimal(item.unit_amount) * requested.quantity; total += amount
             db.add(AfterSalesItem(id=str(uuid4()), case_id=case.id, order_item_id=item.id, quantity=requested.quantity, refund_amount=amount))
         case.eligible_amount = total
         _audit(db, case.id, "CASE_CREATED", "售后单已创建，等待用户确认。", "customer", user_id, request_id)
@@ -221,13 +251,21 @@ def _transition_case(
 
 
 def confirm_case(db: Session, user_id: str, case_id: int, idempotency_key: str, request_id: str | None = None) -> AfterSalesCase:
+    def _reserve(case: AfterSalesCase) -> None:
+        if case.request_type == "exchange":
+            from .exchange import reserve_exchange
+            reserve_exchange(db, case)
     return _transition_case(db, user_id, case_id, "confirm_after_sales_case", idempotency_key, {"case_id": case_id},
-        {PENDING_CONFIRMATION}, AWAITING_PICKUP, "CASE_CONFIRMED", "用户已确认售后操作，等待预约取件。", request_id)
+        {PENDING_CONFIRMATION}, AWAITING_PICKUP, "CASE_CONFIRMED", "用户已确认售后操作，等待预约取件。", request_id, after_transition=_reserve)
 
 
 def cancel_case(db: Session, user_id: str, case_id: int, idempotency_key: str, request_id: str | None = None) -> AfterSalesCase:
+    def _release(case: AfterSalesCase) -> None:
+        if case.request_type == "exchange":
+            from .exchange import release_exchange_reservation
+            release_exchange_reservation(db, case, "CUSTOMER_CANCELLED")
     return _transition_case(db, user_id, case_id, "cancel_after_sales_case", idempotency_key, {"case_id": case_id},
-        {PENDING_CONFIRMATION, AWAITING_PICKUP}, CANCELLED, "CASE_CANCELLED", "用户已取消售后操作。", request_id)
+        {PENDING_CONFIRMATION, AWAITING_PICKUP, "fulfillment_exception"}, CANCELLED, "CASE_CANCELLED", "用户已取消售后操作。", request_id, after_transition=_release)
 
 
 def schedule_pickup(

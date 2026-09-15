@@ -100,6 +100,18 @@ class ReviewDecisionRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class ReviewAttachmentRequest(BaseModel):
+    object_ref: str = Field(min_length=3, max_length=256)
+    content_hash: str = Field(min_length=32, max_length=64, pattern=r"^[a-fA-F0-9]+$")
+    media_type: str = Field(min_length=3, max_length=128)
+    expected_version: int = Field(ge=1)
+    model_config = {"extra": "forbid"}
+
+class ReviewAttachmentResponse(BaseModel):
+    id: str; ticket_id: str; object_ref: str; content_hash: str; media_type: str; version: int; created_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class ReviewTicketResponse(BaseModel):
     id: str
     requester_id: str

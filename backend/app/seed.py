@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Actor, AlertRuleVersion, EvaluationSuite, Logistics, Order, PolicyVersion, User
+from .models import Actor, AlertRuleVersion, EvaluationSuite, InventoryStock, Logistics, Order, OrderItem, PaymentTransaction, PolicyVersion, User
 from .domain.service import request_fingerprint
 
 
@@ -34,11 +34,27 @@ def seed_demo_data(db: Session) -> None:
             Logistics(order_id="O1003", status="delivered", tracking_number="SF1001003"),
             Logistics(order_id="O1004", status="delivered", tracking_number="SF1001004"),
         ])
+    # Real line rows make partial-refund and exchange demos deterministic.
+    line_specs = [
+        ("item-o1001-headset", "O1001", "AURORA-NC", "Aurora 无线降噪耳机", 1, Decimal("299")),
+        ("item-o1002-headset", "O1002", "AURORA-BT", "Aurora 蓝牙耳机", 1, Decimal("199")),
+        ("item-o1003-sport", "O1003", "AURORA-SPORT", "Aurora 运动耳机", 1, Decimal("399")),
+        ("item-o1004-basic", "O1004", "AURORA-BASIC", "Aurora 入门耳机", 1, Decimal("129")),
+    ]
+    for line_id, order_id, sku, title, quantity, amount in line_specs:
+        if db.get(OrderItem, line_id) is None: db.add(OrderItem(id=line_id, order_id=order_id, sku=sku, title=title, quantity=quantity, unit_amount=amount))
+        if db.get(InventoryStock, sku) is None: db.add(InventoryStock(sku=sku, available_quantity=20, reserved_quantity=0))
+    for order_id, user_id, amount in (("O1001", "U001", Decimal("299")), ("O1002", "U001", Decimal("199")), ("O1003", "U001", Decimal("399")), ("O1004", "U002", Decimal("129"))):
+        if db.scalar(select(PaymentTransaction).where(PaymentTransaction.order_id == order_id)) is None:
+            db.add(PaymentTransaction(id=f"payment-{order_id}", order_id=order_id, user_id=user_id, provider="demo_payment", provider_payment_id=f"pay-{order_id}", amount=amount, status="captured"))
     for actor in (
         Actor(id="U001", display_name="李雷", role="customer"),
         Actor(id="U002", display_name="韩梅梅", role="customer"),
         Actor(id="OPS001", display_name="运营一号", role="operator"),
         Actor(id="OPS_MANAGER", display_name="运营主管", role="ops_manager"),
+        Actor(id="FIN001", display_name="财务一号", role="finance"),
+        Actor(id="REVIEW001", display_name="审核一号", role="reviewer"),
+        Actor(id="PAYMENT_WORKER", display_name="支付服务", role="internal_service"),
     ):
         if db.get(Actor, actor.id) is None:
             db.add(actor)

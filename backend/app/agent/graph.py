@@ -58,7 +58,13 @@ class AgentGraph:
                 state["run_id"], sequence, node, tool_name, arguments, None, request_id,
                 int((time.perf_counter() - started) * 1000), "failed", error.code,
             )
-            return None, {"tool_sequence": sequence, "last_error_code": error.code, "final_response": f"业务系统拒绝了该操作：{error.message}（{error.code}）。"}
+            if error.code == "ORDER_ITEMS_REQUIRED":
+                response = "该订单有多个商品。请告诉我需要售后的商品和数量，或在订单商品列表中选择。"
+            elif error.code == "ORDER_ITEM_QUANTITY_INVALID":
+                response = "所选商品的可售后数量不足。请确认商品和数量。"
+            else:
+                response = f"业务系统拒绝了该操作：{error.message}（{error.code}）。"
+            return None, {"tool_sequence": sequence, "last_error_code": error.code, "final_response": response}
         self.traces.record_tool_call(
             state["run_id"], sequence, node, tool_name, arguments, result, request_id,
             int((time.perf_counter() - started) * 1000), "succeeded",

@@ -19,7 +19,7 @@ class Actor(Base):
     """Server-side role mapping; callers never provide a role in request bodies."""
 
     __tablename__ = "actors"
-    __table_args__ = (CheckConstraint("role IN ('customer', 'operator', 'ops_manager', 'internal_service')", name="ck_actor_role"),)
+    __table_args__ = (CheckConstraint("role IN ('customer', 'operator', 'ops_manager', 'finance', 'reviewer', 'internal_service')", name="ck_actor_role"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(64))
@@ -668,6 +668,8 @@ class AgentThread(Base):
     memory_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # Plain ID avoids a circular FK and identifies the one task a customer message may affect.
+    focus_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
 
 class AgentMessageRecord(Base):
@@ -704,7 +706,7 @@ class AgentTask(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("agent_threads.id"), unique=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("agent_threads.id"), index=True)
     intent: Mapped[str] = mapped_column(String(64))
     phase: Mapped[str] = mapped_column(String(48), default="collecting_slots")
     slots_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -713,6 +715,7 @@ class AgentTask(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentTaskEvent(Base):
@@ -843,10 +846,50 @@ class InventoryStock(Base):
 
 class InventoryReservation(Base):
     __tablename__ = "inventory_reservations"
-    __table_args__ = (UniqueConstraint("case_id", name="uq_inventory_reservation_case"),)
+    __table_args__ = (UniqueConstraint("case_id", name="uq_inventory_reservation_case"), CheckConstraint("status IN ('reserved', 'released', 'consumed')", name="ck_inventory_reservation_status"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
     sku: Mapped[str] = mapped_column(String(64), index=True)
     quantity: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="reserved")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ExchangeFulfillment(Base):
+    """Replacement fulfillment is separate from the return and inventory reservation."""
+    __tablename__ = "exchange_fulfillments"
+    __table_args__ = (UniqueConstraint("case_id", name="uq_exchange_fulfillment_case"), CheckConstraint("status IN ('pending', 'allocated', 'shipped', 'delivered', 'failed', 'cancelled')", name="ck_exchange_fulfillment_status"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
+    replacement_sku: Mapped[str] = mapped_column(String(64))
+    quantity: Mapped[int] = mapped_column(Integer)
+    reservation_id: Mapped[str | None] = mapped_column(ForeignKey("inventory_reservations.id"), nullable=True)
+    tracking_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class ReviewAttachment(Base):
+    __tablename__ = "review_attachments"
+    __table_args__ = (UniqueConstraint("ticket_id", "content_hash", name="uq_review_attachment_hash"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("review_tickets.id"), index=True)
+    uploaded_by: Mapped[str] = mapped_column(String(64))
+    object_ref: Mapped[str] = mapped_column(String(256))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    media_type: Mapped[str] = mapped_column(String(128))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class PrivacyRequest(Base):
+    __tablename__ = "privacy_requests"
+    __table_args__ = (CheckConstraint("request_type IN ('export', 'delete')", name="ck_privacy_request_type"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    request_type: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

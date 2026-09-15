@@ -64,11 +64,25 @@ class AgentRuntime:
     def reconcile(self) -> int:
         return self.memory.reconcile_confirmed_after_sales()
 
+    def list_tasks(self, thread_id: str, actor_id: str) -> list[dict]:
+        try: return self.memory.list_tasks(thread_id, actor_id)
+        except ThreadAccessError as error: raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
+
+    def focus_task(self, thread_id: str, actor_id: str, task_id: str, *, restore: bool = False) -> dict:
+        try: return self.memory.focus_task(thread_id, actor_id, task_id, restore=restore)
+        except ThreadAccessError as error: raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
+
+    def archive_task(self, thread_id: str, actor_id: str, task_id: str) -> dict:
+        try: return self.memory.archive_task(thread_id, actor_id, task_id)
+        except ThreadAccessError as error: raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
+
     def cancel_task(self, thread_id: str, actor_id: str) -> dict:
         pending = self.traces.get_pending_confirmation(thread_id, actor_id)
         if pending is not None:
             resolved = self.resolve_confirmation(pending.id, actor_id, False)
-            return {"thread_id": thread_id, "response": "已取消本次申请。", "task": resolved.get("memory")}
+            result = {"thread_id": thread_id, "response": "已取消本次申请。", "task": resolved.get("memory")}
+            self.memory.append_control_reply(thread_id, {**resolved, **result})
+            return result
         pending_review = self.traces.get_pending_review_confirmation(thread_id, actor_id)
         if pending_review is not None:
             resolved = self.resolve_confirmation(pending_review.id, actor_id, False)
@@ -79,7 +93,9 @@ class AgentRuntime:
             raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
         if task is None:
             raise AgentRuntimeError("TASK_NOT_ACTIVE", "当前没有可取消的任务。")
-        return {"thread_id": thread_id, "response": "已放弃当前任务。", "task": task}
+        result = {"thread_id": thread_id, "response": "已放弃当前任务。", "task": task}
+        self.memory.append_control_reply(thread_id, {"response": result["response"], "memory": task})
+        return result
 
     @staticmethod
     def _response(thread_id: str, run_id: str, status: str, response: str, *, confirmation_id=None, case_id=None, ticket_id=None, retrieval_id=None, citations=None, memory=None, last_error_code=None) -> dict:
@@ -190,6 +206,7 @@ class AgentRuntime:
         case_id = confirmation.case_id if confirmation is not None else None
         memory = self.memory.finish_confirmation(active_confirmation.thread_id, actor_id, approved, case_id)
         result = self._response(active_confirmation.thread_id, active_confirmation.run_id, "completed", graph_result.get("final_response", "确认处理完成。"), confirmation_id=confirmation_id, case_id=case_id, ticket_id=graph_result.get("review_ticket_id"), retrieval_id=graph_result.get("retrieval_id"), citations=graph_result.get("citations", []), memory=memory)
+        self.memory.append_control_reply(active_confirmation.thread_id, result)
         return result
 
 

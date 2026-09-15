@@ -49,6 +49,7 @@ export function AgentShowcase() {
   const [draft, setDraft] = useState("");
   const [items, setItems] = useState<ChatItem[]>([]);
   const [memory, setMemory] = useState<AgentTaskMemory>();
+  const [tasks, setTasks] = useState<AgentTaskMemory[]>([]);
   const [activeRunId, setActiveRunId] = useState<string>();
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -69,7 +70,7 @@ export function AgentShowcase() {
         const snapshot = saved ? await api.agentThread(actor, saved) : null;
         if (!active) return;
         if (snapshot) {
-          setThreadId(snapshot.thread_id); setItems(snapshotItems(snapshot)); setMemory(snapshot.task || undefined); setNextBeforeSequence(snapshot.next_before_sequence || undefined);
+          setThreadId(snapshot.thread_id); setItems(snapshotItems(snapshot)); setMemory(snapshot.task || undefined); setTasks(snapshot.tasks || (snapshot.task ? [snapshot.task] : [])); setNextBeforeSequence(snapshot.next_before_sequence || undefined);
           setActiveRunId([...snapshot.messages].reverse().find((item) => item.payload)?.payload?.run_id);
         } else {
           const created = await api.createAgentThread(actor);
@@ -102,7 +103,7 @@ export function AgentShowcase() {
       const result = await api.agentMessage(actor, threadId, input, `web-message-${id}`);
       const hydrated = await hydrateResult(result);
       setItems((current) => [...current, { id: crypto.randomUUID(), role: "agent", content: result.response, result, ...hydrated }]);
-      setMemory(result.memory || undefined); setActiveRunId(result.run_id);
+      setMemory(result.memory || undefined); setActiveRunId(result.run_id); if (threadId) setTasks(await api.agentTasks(actor, threadId));
     } catch (error) { messageApi.error(error instanceof Error ? error.message : "Agent 请求失败，请稍后重试。"); }
     finally { setSending(false); }
   }
@@ -114,7 +115,7 @@ export function AgentShowcase() {
       const result = await api.resolveAgentConfirmation(actor, item.result.confirmation_id, approved);
       const hydrated = await hydrateResult(result);
       setItems((current) => [...current, { id: crypto.randomUUID(), role: "agent", content: result.response, result, ...hydrated }]);
-      setMemory(result.memory || undefined); setActiveRunId(result.run_id);
+      setMemory(result.memory || undefined); setActiveRunId(result.run_id); if (threadId) setTasks(await api.agentTasks(actor, threadId));
       messageApi.success(approved ? "确认已提交，Agent 已恢复执行。" : "已取消本次申请。");
     } catch (error) { messageApi.error(error instanceof Error ? error.message : "确认失败，请重试。"); }
     finally { setConfirming(false); }
@@ -144,6 +145,17 @@ export function AgentShowcase() {
       messageApi.success(result.response);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : "取消任务失败，请重试。"); }
     finally { setCancellingTask(false); }
+  }
+
+  async function switchTask(taskId: string, restore = false) {
+    if (!threadId) return;
+    try { const result = await api.focusAgentTask(actor, threadId, taskId, restore); setMemory(result.task); setTasks(await api.agentTasks(actor, threadId)); }
+    catch (error) { messageApi.error(error instanceof Error ? error.message : "切换任务失败。"); }
+  }
+  async function archiveTask(taskId: string) {
+    if (!threadId) return;
+    try { await api.archiveAgentTask(actor, threadId, taskId); setTasks(await api.agentTasks(actor, threadId)); if (memory?.task_id === taskId) setMemory(undefined); }
+    catch (error) { messageApi.error(error instanceof Error ? error.message : "归档任务失败。"); }
   }
 
   async function resetConversation() {
@@ -177,7 +189,7 @@ export function AgentShowcase() {
           <div className="agent-compose-actions"><Typography.Text type="secondary">Enter 发送，Shift + Enter 换行</Typography.Text><Button type="primary" disabled={loadingThread || !threadId} loading={sending} onClick={() => void send()}>发送</Button></div>
         </Card></Col>
         <Col xs={24} lg={9}><Space direction="vertical" size="middle" className="agent-side-stack">
-          <Card title="当前任务记忆" extra={memory ? <Space><Tag color={memory.phase === "completed" ? "green" : "blue"}>{phaseLabel[memory.phase]}</Tag>{["collecting_slots", "awaiting_pickup_slot", "awaiting_customer_confirmation"].includes(memory.phase) && <Button danger size="small" loading={cancellingTask} onClick={() => void cancelCurrentTask()}>{memory.phase === "awaiting_customer_confirmation" ? "取消申请" : "放弃任务"}</Button>}</Space> : null}>{memory ? <Descriptions size="small" column={1}><Descriptions.Item label="任务">{taskLabel[memory.intent] || memory.intent}</Descriptions.Item><Descriptions.Item label="已收集">{Object.entries(memory.slots).filter(([, value]) => value !== null && value !== undefined && value !== "").map(([key, value]) => <Tag key={key}>{`${key}: ${String(value)}`}</Tag>)}</Descriptions.Item><Descriptions.Item label="仍需补充">{memory.missing_slots.length ? memory.missing_slots.map((slot) => <Tag color="orange" key={slot}>{({ order_id: "订单号", request_type: "售后类型", case_id: "售后单编号", time_slot: "取件时段" } as Record<string, string>)[slot] || slot}</Tag>) : "无"}</Descriptions.Item><Descriptions.Item label="版本">v{memory.version}</Descriptions.Item></Descriptions> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无活跃任务" />}</Card>
+          <Card title="当前任务记忆" extra={memory ? <Space><Tag color={memory.phase === "completed" ? "green" : "blue"}>{phaseLabel[memory.phase]}</Tag>{["collecting_slots", "awaiting_pickup_slot", "awaiting_customer_confirmation"].includes(memory.phase) && <Button danger size="small" loading={cancellingTask} onClick={() => void cancelCurrentTask()}>{memory.phase === "awaiting_customer_confirmation" ? "取消申请" : "放弃任务"}</Button>}</Space> : null}>{memory ? <Descriptions size="small" column={1}><Descriptions.Item label="任务">{taskLabel[memory.intent] || memory.intent}</Descriptions.Item><Descriptions.Item label="已收集">{Object.entries(memory.slots).filter(([, value]) => value !== null && value !== undefined && value !== "").map(([key, value]) => <Tag key={key}>{`${key}: ${String(value)}`}</Tag>)}</Descriptions.Item><Descriptions.Item label="仍需补充">{memory.missing_slots.length ? memory.missing_slots.map((slot) => <Tag color="orange" key={slot}>{({ order_id: "订单号", request_type: "售后类型", case_id: "售后单编号", time_slot: "取件时段" } as Record<string, string>)[slot] || slot}</Tag>) : "无"}</Descriptions.Item><Descriptions.Item label="版本">v{memory.version}</Descriptions.Item></Descriptions> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无焦点任务" />}<Divider style={{ margin: "12px 0" }} />{tasks.length ? <List size="small" dataSource={tasks} renderItem={(task) => <List.Item actions={[task.task_id !== memory?.task_id ? <Button key="focus" size="small" onClick={() => void switchTask(task.task_id)}>切换</Button> : null, <Button key="archive" size="small" onClick={() => void archiveTask(task.task_id)}>归档</Button>]}><Space><Tag>{taskLabel[task.intent] || task.intent}</Tag><Typography.Text type="secondary">{phaseLabel[task.phase]}</Typography.Text></Space></List.Item>} /> : null}</Card>
           <Card title="本次受控执行" extra={activeItem?.result && resultTag(activeItem.result.status)}>{activeItem ? <><Descriptions size="small" column={1}><Descriptions.Item label="Run"><Typography.Text copyable>{activeItem.result?.run_id}</Typography.Text></Descriptions.Item><Descriptions.Item label="业务对象">{activeItem.result?.case_id ? `售后单 #${activeItem.result.case_id}` : activeItem.result?.ticket_id ? `审核单 #${activeItem.result.ticket_id.slice(0, 8)}` : "仅查询或补充信息"}</Descriptions.Item></Descriptions><Steps direction="vertical" size="small" current={activeItem.tools?.length || 0} items={(activeItem.tools || []).map((tool) => ({ title: labelForTool[tool.tool_name] || tool.tool_name, description: <Space><Tag color={tool.status === "succeeded" ? "green" : "red"}>{tool.status}</Tag><span>{tool.latency_ms} ms</span><Tooltip title={JSON.stringify(tool.arguments_json)}><Typography.Text type="secondary">参数</Typography.Text></Tooltip></Space>, status: tool.status === "succeeded" ? "finish" : "error" }))} /></> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="发送消息后显示工具 Trace" />}</Card>
           <Card title="为什么值得信任？"><Space direction="vertical"><Typography.Text>✓ 任务槽位由数据库显式保存</Typography.Text><Typography.Text>✓ 高风险写操作必须确认</Typography.Text><Typography.Text>✓ Agent 不能直连数据库</Typography.Text><Typography.Text>✓ 只检索已发布的知识版本</Typography.Text><Typography.Text>✓ 每次调用都可关联审计与 Trace</Typography.Text></Space></Card>
           <Card title="演示订单"><Typography.Paragraph><b>O1001</b>：签收 3 天、未拆封，可退款</Typography.Paragraph><Typography.Paragraph><b>O1003</b>：质量问题，可申请人工审核</Typography.Paragraph><Typography.Text type="secondary">这是开发演示数据，不代表真实商城政策。</Typography.Text></Card>

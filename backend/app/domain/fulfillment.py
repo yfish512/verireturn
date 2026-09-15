@@ -175,6 +175,12 @@ def _apply_inbox_locked(db: Session, inbox: InboxEvent, case: AfterSalesCase) ->
     if inbox.event_type == "return.received" and case.request_type == "refund":
         from .payments import ensure_refund_intent
         ensure_refund_intent(db, case)
+    if inbox.event_type == "replacement.shipped" and case.request_type == "exchange":
+        from .exchange import consume_exchange_reservation
+        fulfillment = consume_exchange_reservation(db, case, str(inbox.payload.get("tracking_number") or "") or None)
+        if fulfillment is not None and fulfillment.status == "failed":
+            inbox.status, inbox.rejection_code = "rejected", "EXCHANGE_STOCK_INCONSISTENCY"
+            return inbox.status
     if target_status == COMPLETED:
         case.completed_at = utcnow()
     inbox.status, inbox.rejection_code, inbox.applied_at = "applied", None, utcnow()
@@ -276,6 +282,10 @@ def process_one_outbox(
     try:
         if event.destination == "fulfillment_provider" and event.event_type == "pickup.requested":
             response = provider.request_pickup(event.payload, event.idempotency_key)
+        elif event.destination == "payment_provider" and event.event_type == "refund.requested":
+            from .payments import submit_refund_provider
+            intent = submit_refund_provider(db, event.payload["intent_id"])
+            response = {"provider_refund_id": intent.provider_refund_id, "status": intent.status}
         elif event.destination == "notification_gateway" and event.event_type == "notification.requested":
             notification = db.get(CustomerNotification, event.payload["notification_id"])
             if notification is None:

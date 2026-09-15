@@ -11,6 +11,7 @@ from ..domain.service import (
     confirm_case,
     create_case,
     get_logistics,
+    list_order_items,
     get_owned_case,
     get_owned_order,
     list_audit_logs,
@@ -52,6 +53,16 @@ def read_order(order_id: str, user_id: str = Depends(current_demo_user), db: Ses
             "condition": order.condition,
             "quality_issue": order.quality_issue,
         }
+    except DomainError as error:
+        raise domain_http_error(error) from error
+
+
+@router.get("/orders/{order_id}/items")
+def read_order_items(order_id: str, user_id: str = Depends(current_demo_user), db: Session = Depends(get_db)):
+    try:
+        return [{"id": item.id, "sku": item.sku, "title": item.title, "quantity": item.quantity,
+                 "refunded_quantity": item.refunded_quantity, "available_after_sales_quantity": item.quantity - item.refunded_quantity,
+                 "unit_amount": item.unit_amount} for item in list_order_items(db, user_id, order_id)]
     except DomainError as error:
         raise domain_http_error(error) from error
 

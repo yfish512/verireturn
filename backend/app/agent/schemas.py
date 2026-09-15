@@ -48,6 +48,7 @@ class AgentThreadSnapshotResponse(BaseModel):
     messages: list[dict]
     task: dict | None = None
     next_before_sequence: int | None = None
+    tasks: list[dict] = Field(default_factory=list)
 
 
 class AgentTaskCancelResponse(BaseModel):
@@ -74,3 +75,11 @@ class AgentToolCallResponse(BaseModel):
     error_code: str | None
 
     model_config = {"from_attributes": True}
+
+
+class AgentTaskFocusRequest(BaseModel):
+    restore: bool = False
+    model_config = {"extra": "forbid"}
+
+class AgentTaskResponse(BaseModel):
+    task: dict

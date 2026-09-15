@@ -298,3 +298,17 @@ def decide_review_ticket(
     _append_event(db, ticket, event_type, event_payload, operator_id, operator_role, request_id)
     _record_idempotency(db, operator_id, operation, idempotency_key, payload_hash, ticket.id)
     return _commit_or_replay(db, operator_id, operation, idempotency_key, payload_hash, ticket.id)
+
+
+def attach_review_evidence(db: Session, ticket_id: str, actor_id: str, object_ref: str, content_hash: str, media_type: str, expected_version: int, request_id: str | None = None):
+    from ..models import ReviewAttachment
+    ticket = db.scalar(select(ReviewTicket).where(ReviewTicket.id == ticket_id).with_for_update())
+    if ticket is None: raise DomainError("REVIEW_TICKET_NOT_FOUND", "审核单不存在。", 404)
+    if ticket.requester_id != actor_id: raise DomainError("REVIEW_TICKET_ACCESS_DENIED", "无权上传该审核单材料。", 403)
+    if ticket.version != expected_version: raise DomainError("REVIEW_VERSION_CONFLICT", "审核单已更新，请刷新后重试。", 409)
+    existing = db.scalar(select(ReviewAttachment).where(ReviewAttachment.ticket_id == ticket_id, ReviewAttachment.content_hash == content_hash))
+    if existing is not None: return existing
+    attachment = ReviewAttachment(id=str(uuid4()), ticket_id=ticket_id, uploaded_by=actor_id, object_ref=object_ref, content_hash=content_hash.lower(), media_type=media_type, version=ticket.version + 1)
+    db.add(attachment); ticket.version += 1; ticket.status = "waiting_customer" if ticket.status == "open" else ticket.status
+    _append_event(db, ticket, "CUSTOMER_ATTACHMENT_ADDED", {"attachment_id":attachment.id,"object_ref":object_ref,"content_hash":content_hash,"media_type":media_type}, actor_id, "customer", request_id)
+    db.commit(); return attachment

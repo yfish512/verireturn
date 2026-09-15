@@ -87,8 +87,14 @@ def current_actor(
 
 
 def require_operator(actor: ActorContext = Depends(current_actor)) -> ActorContext:
-    if actor.role not in {"operator", "ops_manager"}:
+    if actor.role not in {"operator", "ops_manager", "reviewer"}:
         raise HTTPException(status_code=403, detail={"code": "OPS_ROLE_REQUIRED", "message": "需要运营人员权限。"})
+    return actor
+
+
+def require_finance(actor: ActorContext = Depends(current_actor)) -> ActorContext:
+    if actor.role not in {"finance", "ops_manager"}:
+        raise HTTPException(status_code=403, detail={"code": "FINANCE_ROLE_REQUIRED", "message": "需要财务权限。"})
     return actor
 
 
@@ -140,3 +146,16 @@ def verify_fulfillment_webhook(raw_body: bytes, signature: str, timestamp: str) 
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected):
         raise HTTPException(status_code=403, detail={"code": "FULFILLMENT_WEBHOOK_SIGNATURE_INVALID", "message": "履约回调签名无效。"})
+
+
+def verify_payment_webhook(raw_body: bytes, signature: str, timestamp: str) -> None:
+    """HMAC raw-body verification with a short replay window and dual-key rotation."""
+    try: sent_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError as error: raise HTTPException(status_code=401, detail={"code":"PAYMENT_WEBHOOK_TIMESTAMP_INVALID","message":"支付回调时间戳无效。"}) from error
+    if sent_at.tzinfo is None or abs((datetime.now(timezone.utc) - sent_at.astimezone(timezone.utc)).total_seconds()) > 300:
+        raise HTTPException(status_code=401, detail={"code":"PAYMENT_WEBHOOK_TIMESTAMP_EXPIRED","message":"支付回调时间戳已过期。"})
+    values = [os.getenv("PAYMENT_WEBHOOK_SECRET"), os.getenv("PAYMENT_WEBHOOK_PREVIOUS_SECRET")]
+    values = [value for value in values if value]
+    if not values: raise HTTPException(status_code=503, detail={"code":"PAYMENT_WEBHOOK_NOT_CONFIGURED","message":"支付回调凭据未配置。"})
+    valid = any(hmac.compare_digest(signature, "sha256=" + hmac.new(value.encode(), raw_body, hashlib.sha256).hexdigest()) for value in values)
+    if not valid: raise HTTPException(status_code=403, detail={"code":"PAYMENT_WEBHOOK_SIGNATURE_INVALID","message":"支付回调签名无效。"})
