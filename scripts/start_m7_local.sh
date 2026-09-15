@@ -55,6 +55,8 @@ start_process fulfillment-worker "$mamba_bin" run -n verireturn python -m script
 start_process knowledge-worker "$mamba_bin" run -n verireturn python -m scripts.run_worker_daemon knowledge
 start_process metrics-worker "$mamba_bin" run -n verireturn python -m scripts.run_worker_daemon metrics
 start_process evaluation-worker "$mamba_bin" run -n verireturn python -m scripts.run_worker_daemon evaluation
+start_process review-sla-worker "$mamba_bin" run -n verireturn python -m scripts.run_worker_daemon review-sla
+start_process maintenance-worker "$mamba_bin" run -n verireturn python -m scripts.run_worker_daemon maintenance
 
 if [ -d frontend/node_modules ]; then
   start_process frontend sh -c 'cd frontend && npm run dev -- --host 127.0.0.1 --port 5173'

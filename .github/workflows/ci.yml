@@ -46,6 +46,13 @@ jobs:
           environment-file: environment.yml
           activate-environment: verireturn
           auto-activate-base: false
+      - name: Migration upgrade and schema check
+        shell: bash -el {0}
+        env:
+          DATABASE_URL: postgresql+psycopg://verireturn:verireturn@127.0.0.1:54329/verireturn_ci_migration
+        run: |
+          alembic upgrade head
+          alembic check
       - name: PostgreSQL integration tests
         shell: bash -el {0}
         env:

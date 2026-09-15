@@ -22,7 +22,12 @@ def ensure_refund_intent(db: Session, case: AfterSalesCase) -> RefundIntent:
     if transaction is None:
         transaction = PaymentTransaction(id=str(uuid4()), order_id=case.order_id, user_id=case.user_id, provider="demo_payment", provider_payment_id=f"pay-{case.order_id}", amount=case.eligible_amount, status="captured")
         db.add(transaction); db.flush()
-    if Decimal(transaction.amount) < Decimal(case.eligible_amount): raise DomainError("REFUND_AMOUNT_EXCEEDS_CAPTURE", "退款金额超过原支付金额。", 409)
+    reserved = db.scalar(select(func.coalesce(func.sum(RefundIntent.amount), 0)).where(
+        RefundIntent.payment_transaction_id == transaction.id,
+        RefundIntent.status.in_(("pending", "submitted", "succeeded")),
+    )) or Decimal("0")
+    if Decimal(transaction.amount) < Decimal(reserved) + Decimal(case.eligible_amount):
+        raise DomainError("REFUND_AMOUNT_EXCEEDS_CAPTURE", "累计退款金额超过原支付金额。", 409)
     intent = RefundIntent(id=str(uuid4()), case_id=case.id, payment_transaction_id=transaction.id, amount=case.eligible_amount, provider=transaction.provider, idempotency_key=f"refund-case-{case.id}", status="pending")
     db.add(intent); db.flush(); enqueue_refund_submission(db, intent)
     _audit(db, case.id, "REFUND_INTENT_CREATED", f"退款意图 {intent.id} 已创建，等待支付渠道提交。", "system", "payment-ledger", intent.id)
@@ -40,14 +45,22 @@ def submit_refund(db: Session, intent_id: str) -> RefundIntent:
     _audit(db, case.id, "REFUND_SUBMITTED", "退款请求已提交支付渠道。", "system", "payment-ledger", intent.id); db.commit(); return intent
 
 def apply_refund_settlement(db: Session, provider: str, provider_refund_id: str, succeeded: bool, event_id: str, payload: dict | None = None) -> RefundIntent:
-    payload = payload or {}; digest = _digest({"provider_refund_id": provider_refund_id, "succeeded": succeeded, "payload": payload})
+    payload = payload or {}
+    try:
+        amount, currency = Decimal(str(payload["amount"])), str(payload["currency"])
+        occurred_at = datetime.fromisoformat(str(payload["occurred_at"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError, ArithmeticError) as error:
+        raise DomainError("PAYMENT_EVENT_FACTS_INVALID", "支付回调必须包含金额、币种和发生时间。", 422) from error
+    digest = _digest({"provider_refund_id": provider_refund_id, "succeeded": succeeded, "payload": payload})
     existing_event = db.scalar(select(PaymentProviderEvent).where(PaymentProviderEvent.provider == provider, PaymentProviderEvent.provider_event_id == event_id).with_for_update())
     if existing_event is not None:
         if existing_event.payload_hash != digest: raise DomainError("PAYMENT_EVENT_CONFLICT", "同一支付事件载荷不一致。", 409)
         return db.get(RefundIntent, existing_event.refund_intent_id)
     intent = db.scalar(select(RefundIntent).where(RefundIntent.provider == provider, RefundIntent.provider_refund_id == provider_refund_id).with_for_update())
     if intent is None: raise DomainError("REFUND_PROVIDER_REFERENCE_NOT_FOUND", "支付回调未关联退款意图。", 404)
-    db.add(PaymentProviderEvent(id=str(uuid4()), provider=provider, provider_event_id=event_id, refund_intent_id=intent.id, payload_hash=digest, outcome="succeeded" if succeeded else "failed", payload=payload))
+    if amount != Decimal(intent.amount) or currency != intent.currency:
+        raise DomainError("PAYMENT_AMOUNT_MISMATCH", "支付回调金额或币种与退款意图不一致。", 422)
+    db.add(PaymentProviderEvent(id=str(uuid4()), provider=provider, provider_event_id=event_id, refund_intent_id=intent.id, payload_hash=digest, outcome="succeeded" if succeeded else "failed", amount=amount, currency=currency, occurred_at=occurred_at, payload=payload))
     if intent.status != "succeeded":
         intent.status, intent.failure_code, intent.settled_at = ("succeeded", None, datetime.now(timezone.utc)) if succeeded else ("failed", "PROVIDER_REFUND_FAILED", datetime.now(timezone.utc))
         attempt = int(db.scalar(select(func.max(RefundAttempt.attempt_no)).where(RefundAttempt.refund_intent_id == intent.id)) or 0) + 1

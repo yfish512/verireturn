@@ -100,6 +100,18 @@ class ReviewDecisionRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class ReviewUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    media_type: str = Field(pattern=r"^(image/jpeg|image/png|application/pdf)$")
+    content_base64: str = Field(min_length=4, max_length=7_000_000)
+    model_config = {"extra": "forbid"}
+
+class ReviewUploadResponse(BaseModel):
+    object_ref: str
+    content_hash: str
+    media_type: str
+    byte_size: int
+
 class ReviewAttachmentRequest(BaseModel):
     object_ref: str = Field(min_length=3, max_length=256)
     content_hash: str = Field(min_length=32, max_length=64, pattern=r"^[a-fA-F0-9]+$")
@@ -283,7 +295,7 @@ class KnowledgeFeedbackResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 FulfillmentEventType = Literal[
-    "pickup.collected", "return.received", "refund.processing", "refund.completed",
+    "pickup.collected", "return.received", "refund.processing",
     "replacement.shipped", "replacement.delivered",
 ]
 

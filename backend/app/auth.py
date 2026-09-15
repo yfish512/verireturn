@@ -24,6 +24,7 @@ class AuthSettings(BaseSettings):
     auth_jwt_secret: str | None = None
     auth_jwt_issuer: str | None = None
     auth_jwt_audience: str | None = None
+    auth_jwks_url: str | None = None
 
 
 def current_demo_user(
@@ -46,17 +47,24 @@ def current_demo_user(
         return x_demo_user_id
     if settings.auth_mode != "jwt":
         raise HTTPException(status_code=503, detail={"code": "AUTH_MODE_INVALID", "message": "身份验证模式配置无效。"})
-    if not settings.auth_jwt_secret or len(settings.auth_jwt_secret) < 32:
-        raise HTTPException(status_code=503, detail={"code": "JWT_SECRET_NOT_CONFIGURED", "message": "JWT 密钥未配置或长度不足。"})
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail={"code": "AUTHENTICATION_REQUIRED", "message": "缺少 Bearer Token。"})
-    decode_options: dict = {"algorithms": ["HS256"], "options": {"require": ["exp", "sub"]}}
+    token = authorization.removeprefix("Bearer ")
+    decode_options: dict = {"options": {"require": ["exp", "sub"]}}
     if settings.auth_jwt_issuer:
         decode_options["issuer"] = settings.auth_jwt_issuer
     if settings.auth_jwt_audience:
         decode_options["audience"] = settings.auth_jwt_audience
     try:
-        payload = jwt.decode(authorization.removeprefix("Bearer "), settings.auth_jwt_secret, **decode_options)
+        if settings.auth_jwks_url:
+            # PyJWKClient honors `kid` and caches the JWKS; roles in the token
+            # remain ignored and are resolved from the database below.
+            key = jwt.PyJWKClient(settings.auth_jwks_url, cache_keys=True).get_signing_key_from_jwt(token).key
+            payload = jwt.decode(token, key, algorithms=["RS256", "ES256"], **decode_options)
+        else:
+            if not settings.auth_jwt_secret or len(settings.auth_jwt_secret) < 32:
+                raise HTTPException(status_code=503, detail={"code": "JWT_SECRET_NOT_CONFIGURED", "message": "JWT 密钥或 JWKS 地址未配置。"})
+            payload = jwt.decode(token, settings.auth_jwt_secret, algorithms=["HS256"], **decode_options)
     except InvalidTokenError as error:
         raise HTTPException(status_code=401, detail={"code": "JWT_INVALID", "message": "身份 Token 无效或已过期。"}) from error
     subject = payload.get("sub")

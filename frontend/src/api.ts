@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTaskCancelResult, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection } from "./types";
+import type { AgentMessage, AgentTaskCancelResult, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection, PickupSlot, OrderLine } from "./types";
 
 const actorId = () => localStorage.getItem("verireturn.opsActor") || "OPS001";
 const idempotency = () => `ops-ui-${crypto.randomUUID()}`;
@@ -78,6 +78,8 @@ export const api = {
   agentToolCalls: (actor: string, runId: string) => request<AgentToolCall[]>(`/agent/runs/${runId}/tool-calls`, {
     headers: { "X-Demo-User-Id": actor },
   }),
+  pickupSlots: (actor: string) => request<PickupSlot[]>("/tools/pickup-slots", { headers: { "X-Demo-User-Id": actor } }),
+  orderLines: (actor: string, orderId: string) => request<OrderLine[]>(`/tools/orders/${orderId}/items`, { headers: { "X-Demo-User-Id": actor } }),
   agentFulfillment: (actor: string, caseId: number) => request<FulfillmentStatus>(`/tools/after-sales/cases/${caseId}/fulfillment`, {
     headers: { "X-Demo-User-Id": actor },
   }),

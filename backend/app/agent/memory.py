@@ -17,11 +17,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..security import normalize_customer_text, redact_text
 from ..models import AgentConfirmation, AgentMessageRecord, AgentTask, AgentTaskEvent, AgentThread
 from .schemas import IntentDecision
 
 _WRITE_INTENTS = {"create_after_sales", "request_manual_review"}
-_SLOT_LABELS = {"order_id": "订单号", "request_type": "售后类型", "case_id": "售后单编号", "time_slot": "取件时段"}
+_SLOT_LABELS = {"order_id": "订单号", "request_type": "售后类型", "case_id": "售后单编号", "time_slot": "取件时段", "items": "商品和数量"}
 _LOCAL_LOCK_GUARD = Lock()
 _LOCAL_THREAD_LOCKS: dict[str, RLock] = {}
 
@@ -78,6 +79,7 @@ class TaskMemory:
 
     def start_message(self, thread_id: str, actor_id: str, content: str, client_message_id: str) -> tuple[str, dict | None]:
         """Persist a user turn before execution; return an existing reply on retry."""
+        content = normalize_customer_text(content)
         self.ensure_thread(thread_id, actor_id)
         with self.session_factory() as db:
             existing = db.scalar(select(AgentMessageRecord).where(
@@ -126,6 +128,15 @@ class TaskMemory:
     def _extract_order(message: str) -> str | None:
         found = re.search(r"(?<![A-Z0-9])(O\d+)(?![A-Z0-9])", message, flags=re.IGNORECASE)
         return found.group(1).upper() if found else None
+
+    @staticmethod
+    def _extract_selected_items(message: str) -> list[dict[str, object]] | None:
+        # The web selector sends only an opaque, server-validated order-line ID.
+        # Free text stays a clarification; it can never manufacture a line ID.
+        found = re.search(r"(?:选择商品|商品)\s+([A-Za-z0-9_-]{8,64})\s*(?:数量|x|×)?\s*(\d{1,2})?", message, re.I)
+        if not found:
+            return None
+        return [{"order_item_id": found.group(1), "quantity": int(found.group(2) or 1)}]
 
     @staticmethod
     def _required(intent: str) -> list[str]:
@@ -183,6 +194,7 @@ class TaskMemory:
                 raise ThreadAccessError("会话不存在或不属于当前客户。")
             task = self._focused_task(db, thread, lock=True)
             raw_order = self._extract_order(message)
+            selected_items = decision.items or self._extract_selected_items(message)
             active_tasks = list(db.scalars(select(AgentTask).where(
                 AgentTask.thread_id == thread_id, AgentTask.archived_at.is_(None),
                 AgentTask.phase.notin_(("completed", "cancelled", "expired")),
@@ -198,7 +210,7 @@ class TaskMemory:
                 is_order_correction
                 or (task.phase == "awaiting_pickup_slot" and decision.intent not in _WRITE_INTENTS)
                 or (task.phase == "collecting_slots" and (
-                    raw_order is not None or decision.time_slot is not None or (decision.request_type is not None and decision.intent not in _WRITE_INTENTS)
+                    raw_order is not None or selected_items is not None or decision.time_slot is not None or (decision.request_type is not None and decision.intent not in _WRITE_INTENTS)
                 ))
             ))
             starts_new_task = decision.intent in _WRITE_INTENTS or decision.intent == "schedule_pickup"
@@ -211,7 +223,7 @@ class TaskMemory:
                 slots = {
                     "order_id": decision.order_id, "request_type": decision.request_type,
                     "reason": decision.reason or message if decision.intent in _WRITE_INTENTS else None,
-                    "case_id": decision.case_id, "time_slot": decision.time_slot,
+                    "case_id": decision.case_id, "time_slot": decision.time_slot, "items": decision.items,
                 }
                 if task is None:
                     task = AgentTask(id=str(uuid4()), thread_id=thread_id, intent=decision.intent, phase="collecting_slots", slots_json=slots, missing_slots=[], version=1)
@@ -236,6 +248,9 @@ class TaskMemory:
                 if decision.time_slot:
                     slots["time_slot"] = decision.time_slot
                     changed["time_slot"] = decision.time_slot
+                if selected_items:
+                    slots["items"] = selected_items
+                    changed["items"] = selected_items
                 if task.active_case_id and not slots.get("case_id"):
                     slots["case_id"] = task.active_case_id
                 task.slots_json = slots
@@ -276,6 +291,11 @@ class TaskMemory:
             if result.get("status") == "awaiting_confirmation":
                 task.phase, task.missing_slots = "awaiting_customer_confirmation", []
                 event = "confirmation_requested"
+            elif result.get("last_error_code") == "ORDER_ITEMS_REQUIRED":
+                task.phase, task.missing_slots = "collecting_slots", ["items"]
+                response = "请选择商品和数量后继续提交。"
+                result = {**result, "response": response}
+                event = "item_selection_requested"
             elif result.get("last_error_code") in {"ORDER_NOT_FOUND", "REFUND_NOT_ELIGIBLE", "EXCHANGE_NOT_ELIGIBLE", "PICKUP_SLOT_INVALID", "PICKUP_SLOT_IN_PAST", "PICKUP_SLOT_OUT_OF_RANGE"}:
                 code = result.get("last_error_code")
                 if code.startswith("PICKUP_SLOT_"):
@@ -334,7 +354,7 @@ class TaskMemory:
             rows = list(db.scalars(statement.order_by(AgentMessageRecord.sequence_no.desc()).limit(limit)))
             rows.reverse()
             recent_turns = [
-                {"role": row.role, "content": " ".join(row.content.split())[:320]}
+                {"role": row.role, "content": redact_text(" ".join(row.content.split())[:320])}
                 for row in rows
             ]
             active_task = self._projection(task)

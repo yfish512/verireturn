@@ -26,3 +26,4 @@ dependencies:
       - fastembed>=0.5,<1
       - jieba>=0.42,<1
       - prometheus-client>=0.21,<1
+      - redis>=5,<6

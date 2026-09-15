@@ -262,11 +262,13 @@ def confirm_case(db: Session, user_id: str, case_id: int, idempotency_key: str, 
 
 def cancel_case(db: Session, user_id: str, case_id: int, idempotency_key: str, request_id: str | None = None) -> AfterSalesCase:
     def _release(case: AfterSalesCase) -> None:
+        from .appointments import cancel_appointment
+        cancel_appointment(db, case, "CUSTOMER_CANCELLED")
         if case.request_type == "exchange":
             from .exchange import release_exchange_reservation
             release_exchange_reservation(db, case, "CUSTOMER_CANCELLED")
     return _transition_case(db, user_id, case_id, "cancel_after_sales_case", idempotency_key, {"case_id": case_id},
-        {PENDING_CONFIRMATION, AWAITING_PICKUP, "fulfillment_exception"}, CANCELLED, "CASE_CANCELLED", "用户已取消售后操作。", request_id, after_transition=_release)
+        {PENDING_CONFIRMATION, AWAITING_PICKUP, PICKUP_SCHEDULED, "fulfillment_exception"}, CANCELLED, "CASE_CANCELLED", "用户已取消售后操作。", request_id, after_transition=_release)
 
 
 def _validate_pickup_slot(time_slot: str, now: datetime | None = None) -> str:
@@ -307,11 +309,15 @@ def schedule_pickup(
     # Validate only after preserving the state-machine error for an unconfirmed case.
     case = get_owned_case(db, user_id, case_id)
     normalized = _validate_pickup_slot(time_slot) if case.status == AWAITING_PICKUP else time_slot
+    from .appointments import reserve_appointment
     from .fulfillment import enqueue_pickup_request
+    def _reserve_and_enqueue(current: AfterSalesCase) -> None:
+        appointment = reserve_appointment(db, current, normalized)
+        current.pickup_slot = appointment.display_text
+        enqueue_pickup_request(db, current, idempotency_key)
     return _transition_case(db, user_id, case_id, "schedule_pickup", idempotency_key, {"case_id": case_id, "time_slot": normalized},
         {AWAITING_PICKUP}, PICKUP_SCHEDULED, "PICKUP_SCHEDULED", f"取件时段：{normalized}", request_id,
-        pickup_slot=normalized, invalid_code="CASE_NOT_CONFIRMED",
-        after_transition=lambda case: enqueue_pickup_request(db, case, idempotency_key))
+        pickup_slot=normalized, invalid_code="CASE_NOT_CONFIRMED", after_transition=_reserve_and_enqueue)
 
 
 def complete_case(db: Session, case_id: int, idempotency_key: str, request_id: str | None = None) -> AfterSalesCase:

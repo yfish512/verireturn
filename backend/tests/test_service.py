@@ -64,7 +64,7 @@ def test_full_lifecycle_writes_an_auditable_state_chain(tmp_path):
     assert case.status == "completed"
     assert case.completed_at is not None
     events = list_audit_logs(db, "U001", case.id)
-    assert [event.event_type for event in events] == ["CASE_CREATED", "CASE_CONFIRMED", "PICKUP_SCHEDULED", "CASE_COMPLETED"]
+    assert [event.event_type for event in events] == ["CASE_CREATED", "CASE_CONFIRMED", "PICKUP_APPOINTMENT_RESERVED", "PICKUP_SCHEDULED", "CASE_COMPLETED"]
     assert events[-1].actor_id == "logistics-simulator"
 
 

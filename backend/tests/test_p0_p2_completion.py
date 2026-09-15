@@ -45,7 +45,7 @@ def test_partial_line_refund_settlement_and_exchange_release(tmp_path):
     for no, kind in ((1,"pickup.collected"),(2,"return.received")):
         receive_provider_event(db,"demo_fulfillment",{"event_id":f"partial-event-{no}","case_id":case.id,"event_type":kind,"sequence_no":no,"occurred_at":datetime.now(timezone.utc),"payload":{}})
     intent=db.scalar(select(RefundIntent).where(RefundIntent.case_id==case.id)); intent.provider_refund_id="partial-provider"; intent.status="submitted"; db.commit()
-    apply_refund_settlement(db,"demo_payment","partial-provider",True,"partial-settlement",{})
+    apply_refund_settlement(db,"demo_payment","partial-provider",True,"partial-settlement",{"amount":"299.00","currency":"CNY","occurred_at":"2026-09-15T12:00:00+00:00"})
     assert db.get(OrderItem,headset.id).refunded_quantity==1
     # Exchange reserves at confirmation and cancellation returns stock.
     exchange=create_case(db,"U001",AfterSalesCreateRequest(order_id="O1003",request_type="exchange",reason="质量问题",items=[AfterSalesItemRequest(order_item_id="item-o1003-sport",quantity=1)]),"exchange-reserve")
@@ -53,3 +53,30 @@ def test_partial_line_refund_settlement_and_exchange_release(tmp_path):
     reservation=db.scalar(select(InventoryReservation).where(InventoryReservation.case_id==exchange.id)); assert reservation and reservation.status=="reserved"
     cancel_case(db,"U001",exchange.id,"exchange-cancel")
     assert db.get(InventoryReservation,reservation.id).status=="released"
+
+
+def test_pickup_appointment_is_structured_capacity_aware_and_cancellable(tmp_path):
+    from backend.app.domain.appointments import list_available_slots
+    from backend.app.models import PickupAppointment, PickupSlotCapacity
+    db, _ = db_session(tmp_path)
+    slots = list_available_slots(db)
+    assert slots and slots[0]["available"] > 0 and slots[0]["timezone"] == "Asia/Shanghai"
+    case = create_case(db, "U001", AfterSalesCreateRequest(order_id="O1001", request_type="refund", reason="预约"), "appointment-case")
+    confirm_case(db, "U001", case.id, "appointment-confirm")
+    schedule_pickup(db, "U001", case.id, "明天上午", "appointment-schedule")
+    appointment = db.scalar(select(PickupAppointment).where(PickupAppointment.case_id == case.id))
+    assert appointment and appointment.start_at < appointment.end_at and appointment.status == "scheduled"
+    cancel_case(db, "U001", case.id, "appointment-cancel")
+    assert db.get(PickupAppointment, appointment.id).status == "cancelled"
+
+
+def test_expired_exchange_reservation_is_released(tmp_path):
+    from datetime import timedelta
+    from backend.app.domain.exchange import release_expired_reservations
+    db, _ = db_session(tmp_path)
+    case = create_case(db, "U001", AfterSalesCreateRequest(order_id="O1003", request_type="exchange", reason="质量", items=[AfterSalesItemRequest(order_item_id="item-o1003-sport", quantity=1)]), "expiry-exchange")
+    confirm_case(db, "U001", case.id, "expiry-confirm")
+    reservation = db.scalar(select(InventoryReservation).where(InventoryReservation.case_id == case.id))
+    reservation.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1); db.commit()
+    assert release_expired_reservations(db) == 1
+    assert db.get(InventoryReservation, reservation.id).status == "released"

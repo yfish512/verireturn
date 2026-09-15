@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import ActorContext, current_actor, require_ops_manager, require_operator
 from ..database import get_db
+from ..security import validate_idempotency_key
 from ..domain.knowledge import (
     add_feedback,
     create_document,
@@ -38,7 +39,7 @@ def _error(error: DomainError) -> HTTPException:
 
 
 def _idempotency_key(value: str = Header(alias="Idempotency-Key", min_length=8, max_length=128)) -> str:
-    return value
+    return validate_idempotency_key(value)
 
 
 @knowledge_router.post("/search", response_model=KnowledgeSearchResponse)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Avatar, Button, Card, Col, Descriptions, Divider, Empty, Input, Layout, List, Row, Select, Space, Spin, Steps, Tag, Timeline, Tooltip, Typography, message } from "antd";
-import type { AgentMessage, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, FulfillmentStatus } from "./types";
+import type { AgentMessage, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, FulfillmentStatus, PickupSlot, OrderLine } from "./types";
 import { api } from "./api";
 
 type ChatItem = {
@@ -57,9 +57,21 @@ export function AgentShowcase() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [cancellingTask, setCancellingTask] = useState(false);
   const [nextBeforeSequence, setNextBeforeSequence] = useState<number>();
+  const [pickupSlots, setPickupSlots] = useState<PickupSlot[]>([]);
+  const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
 
   const activeItem = useMemo(() => [...items].reverse().find((item) => item.role === "agent" && item.result?.run_id === activeRunId), [items, activeRunId]);
+
+  useEffect(() => {
+    if (memory?.phase !== "awaiting_pickup_slot") { setPickupSlots([]); return; }
+    void api.pickupSlots(actor).then(setPickupSlots).catch(() => setPickupSlots([]));
+  }, [actor, memory?.phase]);
+  useEffect(() => {
+    const orderId = memory?.slots.order_id;
+    if (memory?.phase !== "collecting_slots" || !memory.missing_slots.includes("items") || typeof orderId !== "string") { setOrderLines([]); return; }
+    void api.orderLines(actor, orderId).then(setOrderLines).catch(() => setOrderLines([]));
+  }, [actor, memory?.phase, memory?.slots, memory?.missing_slots]);
 
   useEffect(() => {
     let active = true;
@@ -164,6 +176,10 @@ export function AgentShowcase() {
     catch (error) { messageApi.error(error instanceof Error ? error.message : "归档任务失败。"); }
   }
 
+  function selectOrderLine(line: OrderLine) {
+    setDraft(`选择商品 ${line.id} 数量 1`);
+  }
+
   async function resetConversation() {
     setLoadingThread(true);
     try {
@@ -195,7 +211,7 @@ export function AgentShowcase() {
           <div className="agent-compose-actions"><Typography.Text type="secondary">Enter 发送，Shift + Enter 换行</Typography.Text><Button type="primary" disabled={loadingThread || !threadId} loading={sending} onClick={() => void send()}>发送</Button></div>
         </Card></Col>
         <Col xs={24} lg={9}><Space direction="vertical" size="middle" className="agent-side-stack">
-          <Card title="当前任务记忆" extra={memory ? <Space><Tag color={memory.phase === "completed" ? "green" : "blue"}>{phaseLabel[memory.phase]}</Tag>{["collecting_slots", "awaiting_pickup_slot", "awaiting_customer_confirmation"].includes(memory.phase) && <Button danger size="small" loading={cancellingTask} onClick={() => void cancelCurrentTask()}>{memory.phase === "awaiting_customer_confirmation" ? "取消申请" : "放弃任务"}</Button>}</Space> : null}>{memory ? <Descriptions size="small" column={1}><Descriptions.Item label="任务">{taskLabel[memory.intent] || memory.intent}</Descriptions.Item><Descriptions.Item label="已收集">{Object.entries(memory.slots).filter(([, value]) => value !== null && value !== undefined && value !== "").map(([key, value]) => <Tag key={key}>{`${key}: ${String(value)}`}</Tag>)}</Descriptions.Item><Descriptions.Item label="仍需补充">{memory.missing_slots.length ? memory.missing_slots.map((slot) => <Tag color="orange" key={slot}>{({ order_id: "订单号", request_type: "售后类型", case_id: "售后单编号", time_slot: "取件时段" } as Record<string, string>)[slot] || slot}</Tag>) : "无"}</Descriptions.Item><Descriptions.Item label="版本">v{memory.version}</Descriptions.Item></Descriptions> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无焦点任务" />}<Divider style={{ margin: "12px 0" }} />{tasks.length ? <List size="small" dataSource={tasks} renderItem={(task) => <List.Item actions={[task.task_id !== memory?.task_id ? <Button key="focus" size="small" onClick={() => void switchTask(task.task_id)}>切换</Button> : null, <Button key="archive" size="small" onClick={() => void archiveTask(task.task_id)}>归档</Button>]}><Space><Tag>{taskLabel[task.intent] || task.intent}</Tag><Typography.Text type="secondary">{phaseLabel[task.phase]}</Typography.Text></Space></List.Item>} /> : null}</Card>
+          <Card title="当前任务记忆" extra={memory ? <Space><Tag color={memory.phase === "completed" ? "green" : "blue"}>{phaseLabel[memory.phase]}</Tag>{["collecting_slots", "awaiting_pickup_slot", "awaiting_customer_confirmation"].includes(memory.phase) && <Button danger size="small" loading={cancellingTask} onClick={() => void cancelCurrentTask()}>{memory.phase === "awaiting_customer_confirmation" ? "取消申请" : "放弃任务"}</Button>}</Space> : null}>{memory ? <Descriptions size="small" column={1}><Descriptions.Item label="任务">{taskLabel[memory.intent] || memory.intent}</Descriptions.Item><Descriptions.Item label="已收集">{Object.entries(memory.slots).filter(([, value]) => value !== null && value !== undefined && value !== "").map(([key, value]) => <Tag key={key}>{`${key}: ${String(value)}`}</Tag>)}</Descriptions.Item><Descriptions.Item label="仍需补充">{memory.missing_slots.length ? memory.missing_slots.map((slot) => <Tag color="orange" key={slot}>{({ order_id: "订单号", request_type: "售后类型", case_id: "售后单编号", time_slot: "取件时段" } as Record<string, string>)[slot] || slot}</Tag>) : "无"}</Descriptions.Item><Descriptions.Item label="版本">v{memory.version}</Descriptions.Item></Descriptions> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无焦点任务" />}{memory?.phase === "awaiting_pickup_slot" && pickupSlots.length ? <><Divider style={{ margin: "12px 0" }} /><Typography.Text type="secondary">可预约时段</Typography.Text><Space wrap style={{ marginTop: 8 }}>{pickupSlots.slice(0, 6).map((slot) => <Button key={slot.start_at} size="small" onClick={() => setDraft(`预约取件 ${slot.label}`)}>{slot.label}（余 {slot.available}）</Button>)}</Space></> : null}{memory?.missing_slots.includes("items") && orderLines.length ? <><Divider style={{ margin: "12px 0" }} /><Typography.Text type="secondary">选择售后商品</Typography.Text><Space direction="vertical" style={{ width: "100%", marginTop: 8 }}>{orderLines.map((line) => <Button key={line.id} disabled={line.available_after_sales_quantity < 1} onClick={() => selectOrderLine(line)}>{line.title} · 可售后 {line.available_after_sales_quantity} 件</Button>)}</Space></> : null}<Divider style={{ margin: "12px 0" }} />{tasks.length ? <List size="small" dataSource={tasks} renderItem={(task) => <List.Item actions={[task.task_id !== memory?.task_id ? <Button key="focus" size="small" onClick={() => void switchTask(task.task_id)}>切换</Button> : null, <Button key="archive" size="small" onClick={() => void archiveTask(task.task_id)}>归档</Button>]}><Space><Tag>{taskLabel[task.intent] || task.intent}</Tag><Typography.Text type="secondary">{phaseLabel[task.phase]}</Typography.Text></Space></List.Item>} /> : null}</Card>
           <Card title="本次受控执行" extra={activeItem?.result && resultTag(activeItem.result.status)}>{activeItem ? <><Descriptions size="small" column={1}><Descriptions.Item label="Run"><Typography.Text copyable>{activeItem.result?.run_id}</Typography.Text></Descriptions.Item><Descriptions.Item label="业务对象">{activeItem.result?.case_id ? `售后单 #${activeItem.result.case_id}` : activeItem.result?.ticket_id ? `审核单 #${activeItem.result.ticket_id.slice(0, 8)}` : "仅查询或补充信息"}</Descriptions.Item></Descriptions><Steps direction="vertical" size="small" current={activeItem.tools?.length || 0} items={(activeItem.tools || []).map((tool) => ({ title: labelForTool[tool.tool_name] || tool.tool_name, description: <Space><Tag color={tool.status === "succeeded" ? "green" : "red"}>{tool.status}</Tag><span>{tool.latency_ms} ms</span><Tooltip title={JSON.stringify(tool.arguments_json)}><Typography.Text type="secondary">参数</Typography.Text></Tooltip></Space>, status: tool.status === "succeeded" ? "finish" : "error" }))} /></> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="发送消息后显示工具 Trace" />}</Card>
           <Card title="为什么值得信任？"><Space direction="vertical"><Typography.Text>✓ 任务槽位由数据库显式保存</Typography.Text><Typography.Text>✓ 高风险写操作必须确认</Typography.Text><Typography.Text>✓ Agent 不能直连数据库</Typography.Text><Typography.Text>✓ 只检索已发布的知识版本</Typography.Text><Typography.Text>✓ 每次调用都可关联审计与 Trace</Typography.Text></Space></Card>
           <Card title="演示订单"><Typography.Paragraph><b>O1001</b>：签收 3 天、未拆封，可退款</Typography.Paragraph><Typography.Paragraph><b>O1003</b>：质量问题，可申请人工审核</Typography.Paragraph><Typography.Text type="secondary">这是开发演示数据，不代表真实商城政策。</Typography.Text></Card>

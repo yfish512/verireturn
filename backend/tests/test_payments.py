@@ -16,8 +16,8 @@ def test_payment_callback_is_idempotent_settles_case_and_reconciliation_finds_ga
         confirm_case(db, "U001", case.id, "payment-case-confirm"); schedule_pickup(db, "U001", case.id, "明天上午", "payment-case-pickup")
         intent = ensure_refund_intent(db, case); db.commit(); submitted = submit_refund(db, intent.id)
         assert db.get(AfterSalesCase, case.id).status == "refund_processing"
-        settled = apply_refund_settlement(db, "demo_payment", submitted.provider_refund_id, True, "pay-event-001", {"amount": "299.00"})
-        replay = apply_refund_settlement(db, "demo_payment", submitted.provider_refund_id, True, "pay-event-001", {"amount": "299.00"})
+        settled = apply_refund_settlement(db, "demo_payment", submitted.provider_refund_id, True, "pay-event-001", {"amount": "299.00", "currency": "CNY", "occurred_at": "2026-09-15T12:00:00+00:00"})
+        replay = apply_refund_settlement(db, "demo_payment", submitted.provider_refund_id, True, "pay-event-001", {"amount": "299.00", "currency": "CNY", "occurred_at": "2026-09-15T12:00:00+00:00"})
         assert settled.id == replay.id == intent.id
         assert db.get(AfterSalesCase, case.id).status == "completed"
         assert db.get(PaymentTransaction, settled.payment_transaction_id).status == "refunded"

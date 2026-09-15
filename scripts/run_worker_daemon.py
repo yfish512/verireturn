@@ -11,6 +11,8 @@ RUNNERS = {
     "fulfillment": "scripts.run_fulfillment_worker",
     "knowledge": "scripts.run_knowledge_worker",
     "evaluation": "scripts.run_evaluation_worker",
+    "maintenance": "scripts.run_maintenance_worker",
+    "review-sla": "scripts.run_review_sla_worker",
 }
 
 

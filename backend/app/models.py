@@ -790,6 +790,10 @@ class PaymentProviderEvent(Base):
     refund_intent_id: Mapped[str] = mapped_column(ForeignKey("refund_intents.id"), index=True)
     payload_hash: Mapped[str] = mapped_column(String(64))
     outcome: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signature_key_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -852,7 +856,43 @@ class InventoryReservation(Base):
     sku: Mapped[str] = mapped_column(String(64), index=True)
     quantity: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="reserved")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    release_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PickupSlotCapacity(Base):
+    __tablename__ = "pickup_slot_capacities"
+    __table_args__ = (UniqueConstraint("provider", "start_at", "end_at", name="uq_pickup_slot_capacity"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    capacity: Mapped[int] = mapped_column(Integer, default=20)
+    reserved_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class PickupAppointment(Base):
+    __tablename__ = "pickup_appointments"
+    __table_args__ = (
+        UniqueConstraint("case_id", name="uq_pickup_appointment_case"),
+        CheckConstraint("status IN ('scheduled', 'cancelled', 'expired')", name="ck_pickup_appointment_status"),
+        Index("ix_pickup_appointments_slot", "provider", "start_at", "end_at", "status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="demo_fulfillment")
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    timezone_name: Mapped[str] = mapped_column(String(64), default="Asia/Shanghai")
+    display_text: Mapped[str] = mapped_column(String(64))
+    provider_appointment_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class ExchangeFulfillment(Base):
@@ -870,6 +910,18 @@ class ExchangeFulfillment(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class ReviewUpload(Base):
+    """Controlled attachment object metadata; object bytes live behind the storage adapter."""
+    __tablename__ = "review_uploads"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    uploaded_by: Mapped[str] = mapped_column(String(64), index=True)
+    object_ref: Mapped[str] = mapped_column(String(256), unique=True)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    media_type: Mapped[str] = mapped_column(String(128))
+    byte_size: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="ready")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class ReviewAttachment(Base):
     __tablename__ = "review_attachments"

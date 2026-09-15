@@ -52,17 +52,17 @@ def test_refund_callbacks_are_sequenced_and_idempotent(tmp_path):
     case = ready_case(db)
     callbacks = [
         ("event-pickup-0001", "pickup.collected", 1), ("event-return-0002", "return.received", 2),
-        ("event-refund-0003", "refund.processing", 3), ("event-refund-0004", "refund.completed", 4),
+        ("event-refund-0003", "refund.processing", 3),
     ]
     delivered = [callback(case.id, *item) for item in callbacks]
     for payload in delivered:
         receive_provider_event(db, "demo_fulfillment", payload)
-    assert db.get(type(case), case.id).status == "completed"
-    assert db.scalar(select(func.count()).select_from(FulfillmentEvent).where(FulfillmentEvent.case_id == case.id)) == 4
+    assert db.get(type(case), case.id).status == "refund_processing"
+    assert db.scalar(select(func.count()).select_from(FulfillmentEvent).where(FulfillmentEvent.case_id == case.id)) == 3
     duplicate = receive_provider_event(db, "demo_fulfillment", delivered[-1])
     assert duplicate.status == "applied"
-    assert db.scalar(select(func.count()).select_from(FulfillmentEvent).where(FulfillmentEvent.case_id == case.id)) == 4
-    assert db.scalar(select(func.count()).select_from(CustomerNotification).where(CustomerNotification.case_id == case.id)) == 4
+    assert db.scalar(select(func.count()).select_from(FulfillmentEvent).where(FulfillmentEvent.case_id == case.id)) == 3
+    assert db.scalar(select(func.count()).select_from(CustomerNotification).where(CustomerNotification.case_id == case.id)) == 3
 
 
 def test_out_of_order_event_is_deferred_then_operator_replay_applies(tmp_path):

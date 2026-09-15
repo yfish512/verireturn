@@ -100,3 +100,7 @@ export interface FulfillmentStatus {
   events: Array<{ id: string; event_type: string; sequence_no: number; occurred_at: string }>;
   notifications: Array<{ id: string; template: string; status: string; created_at: string }>;
 }
+
+export interface PickupSlot { start_at: string; end_at: string; timezone: string; label: string; available: number; }
+
+export interface OrderLine { id: string; sku: string; title: string; quantity: number; refunded_quantity: number; available_after_sales_quantity: number; unit_amount: string; }

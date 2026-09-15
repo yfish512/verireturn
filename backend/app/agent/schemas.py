@@ -15,6 +15,7 @@ class IntentDecision(BaseModel):
     request_type: Literal["refund", "exchange"] | None = None
     reason: str | None = None
     time_slot: str | None = None
+    items: list[dict[str, object]] | None = None
 
     model_config = {"extra": "forbid"}
 

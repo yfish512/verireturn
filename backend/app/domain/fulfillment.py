@@ -30,7 +30,7 @@ REPLACEMENT_SHIPPED = "replacement_shipped"
 COMPLETED = "completed"
 
 PROVIDER_EVENTS = {
-    "pickup.collected", "return.received", "refund.processing", "refund.completed",
+    "pickup.collected", "return.received", "refund.processing",
     "replacement.shipped", "replacement.delivered",
 }
 
@@ -136,7 +136,6 @@ def _next_target(case: AfterSalesCase, event_type: str) -> tuple[str, str, str] 
         (PICKUP_SCHEDULED, "pickup.collected"): (PICKED_UP, "FULFILLMENT_PICKED_UP", "快递员已取走您的退货包裹。"),
         (PICKED_UP, "return.received"): (RETURN_RECEIVED, "FULFILLMENT_RETURN_RECEIVED", "仓库已签收退货，正在处理。"),
         (RETURN_RECEIVED, "refund.processing"): (REFUND_PROCESSING, "FULFILLMENT_REFUND_PROCESSING", "退款正在处理，请留意到账通知。"),
-        (REFUND_PROCESSING, "refund.completed"): (COMPLETED, "FULFILLMENT_REFUND_COMPLETED", "退款已完成。"),
         (RETURN_RECEIVED, "replacement.shipped"): (REPLACEMENT_SHIPPED, "FULFILLMENT_REPLACEMENT_SHIPPED", "换货商品已发出。"),
         (REPLACEMENT_SHIPPED, "replacement.delivered"): (COMPLETED, "FULFILLMENT_REPLACEMENT_DELIVERED", "换货商品已送达，售后流程完成。"),
     }

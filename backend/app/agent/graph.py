@@ -25,6 +25,7 @@ class AgentState(TypedDict, total=False):
     request_type: str
     reason: str
     time_slot: str
+    items: list[dict[str, Any]]
     tool_sequence: int
     confirmation_id: str
     review_ticket_id: str
@@ -148,11 +149,30 @@ class AgentGraph:
             return {**update, "final_response": f"可以申请{ '退款' if state['request_type'] == 'refund' else '换货' }，可处理金额为 {result['eligible_amount']} 元。"}
         return {**update, "last_error_code": result["policy_code"], "final_response": f"暂不符合售后条件：{result['explanation']}。"}
 
+    def _create_case_tool(self, state: AgentState, reason: str, request_id: str) -> dict:
+        """Pass structured lines to modern tools while retaining M1 test/demo adapters."""
+        try:
+            return self.tools.create_case(state["actor_id"], state["order_id"], state["request_type"], reason, state.get("items"), request_id, _stable_key(state, "create"))
+        except TypeError:
+            return self.tools.create_case(state["actor_id"], state["order_id"], state["request_type"], reason, request_id, _stable_key(state, "create"))
+
     def create_case(self, state: AgentState) -> dict:
         if not state.get("order_id"):
             return {"final_response": "请提供订单号，例如 O1001。"}
         if not state.get("request_type"):
             return {"final_response": "请说明您想退款还是换货。"}
+        if not state.get("items") and hasattr(self.tools, "get_order_items"):
+            order_items, update = self._call(
+                state, "create_case", "get_order_items", {"order_id": state["order_id"]},
+                lambda request_id: self.tools.get_order_items(state["actor_id"], state["order_id"], request_id),
+            )
+            if order_items is None:
+                return update
+            if len(order_items) > 1:
+                choices = "；".join(f"{item['title']}（可售后 {item['available_after_sales_quantity']} 件）" for item in order_items)
+                return {**update, "last_error_code": "ORDER_ITEMS_REQUIRED", "final_response": f"请选择需要售后的商品和数量：{choices}。"}
+            if order_items:
+                state = {**state, "items": [{"order_item_id": order_items[0]["id"], "quantity": 1}]}
         # The model may summarize away evidence terms (for example “损坏”).
         # Policy routing must evaluate the immutable user input, not that
         # lossy summary; the model only chooses this bounded workflow.
@@ -168,10 +188,8 @@ class AgentGraph:
             return {**update, "last_error_code": eligibility["policy_code"], "final_response": f"暂不符合售后条件：{eligibility['explanation']}。"}
         created, update = self._call(
             {**state, **update}, "create_case", "create_after_sales_case",
-            {"order_id": state["order_id"], "request_type": state["request_type"]},
-            lambda request_id: self.tools.create_case(
-                state["actor_id"], state["order_id"], state["request_type"], reason, request_id, _stable_key(state, "create"),
-            ),
+            {"order_id": state["order_id"], "request_type": state["request_type"], "items": state.get("items")},
+            lambda request_id: self._create_case_tool(state, reason, request_id),
         )
         if created is None:
             return update

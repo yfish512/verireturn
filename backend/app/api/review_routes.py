@@ -5,10 +5,12 @@ from sqlalchemy.orm import Session
 
 from ..auth import ActorContext, current_actor, require_operator, require_ops_manager
 from ..database import get_db
+from ..security import validate_idempotency_key
 from ..domain.review_service import (
     claim_review_ticket,
     create_review_ticket,
     attach_review_evidence,
+    create_review_upload,
     decide_review_ticket,
     get_owned_review_ticket,
     get_review_ticket,
@@ -23,7 +25,7 @@ from ..domain.ops_metrics import review_metrics
 from ..schemas import (
     ReviewClaimRequest,
     ReviewDecisionRequest,
-    ReviewAttachmentRequest, ReviewAttachmentResponse,
+    ReviewAttachmentRequest, ReviewAttachmentResponse, ReviewUploadRequest, ReviewUploadResponse,
     ReviewEventResponse,
     OpsMetricsResponse,
     PolicyVersionPublishRequest,
@@ -43,7 +45,7 @@ def domain_http_error(error: DomainError) -> HTTPException:
 
 
 def idempotency_key(value: str = Header(alias="Idempotency-Key", min_length=8, max_length=128)) -> str:
-    return value
+    return validate_idempotency_key(value)
 
 
 def request_id(value: str | None = Header(default=None, alias="X-Request-Id", max_length=64)) -> str | None:
@@ -65,6 +67,15 @@ def submit_review_ticket(
     except DomainError as error:
         raise domain_http_error(error) from error
 
+
+@customer_router.post("/uploads", response_model=ReviewUploadResponse, status_code=201)
+def upload_review_evidence(request: ReviewUploadRequest, actor: ActorContext = Depends(current_actor), db: Session = Depends(get_db)):
+    if actor.role != "customer":
+        raise HTTPException(status_code=403, detail={"code": "CUSTOMER_ROLE_REQUIRED", "message": "只有客户可上传审核材料。"})
+    try:
+        return create_review_upload(db, actor.id, request.filename, request.media_type, request.content_base64)
+    except DomainError as error:
+        raise domain_http_error(error) from error
 
 @customer_router.get("/{ticket_id}", response_model=ReviewTicketResponse)
 def read_review_ticket(ticket_id: str, actor: ActorContext = Depends(current_actor), db: Session = Depends(get_db)):
@@ -180,5 +191,12 @@ def decide_ops_review_ticket(
 ):
     try:
         return decide_review_ticket(db, ticket_id, actor.id, actor.role, request, key, trace_id)
+    except DomainError as error:
+        raise domain_http_error(error) from error
+
+@customer_router.post("/{ticket_id}/attachments", response_model=ReviewAttachmentResponse, status_code=201)
+def attach_customer_evidence(ticket_id: str, request: ReviewAttachmentRequest, actor: ActorContext = Depends(current_actor), trace_id: str | None = Depends(request_id), db: Session = Depends(get_db)):
+    try:
+        return attach_review_evidence(db, ticket_id, actor.id, request.object_ref, request.content_hash, request.media_type, request.expected_version, trace_id)
     except DomainError as error:
         raise domain_http_error(error) from error

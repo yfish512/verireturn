@@ -1,6 +1,7 @@
 """Inventory-backed exchange fulfillment. All counters are changed under stock row locks."""
 from __future__ import annotations
 from uuid import uuid4
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ..models import AfterSalesCase, AfterSalesItem, ExchangeFulfillment, FulfillmentIncident, InventoryReservation, InventoryStock, OrderItem
@@ -27,7 +28,7 @@ def reserve_exchange(db: Session, case: AfterSalesCase) -> ExchangeFulfillment |
     if stock is None or stock.available_quantity - stock.reserved_quantity < lines[0].quantity:
         case.status = "fulfillment_exception"; _incident(db, case, "EXCHANGE_OUT_OF_STOCK", "替换商品库存不足，等待补货、退款或人工处理。")
         _audit(db, case.id, "EXCHANGE_STOCK_EXCEPTION", "替换商品库存不足。", "system", "inventory", None); return None
-    reservation = InventoryReservation(id=str(uuid4()), case_id=case.id, sku=item.sku, quantity=lines[0].quantity, status="reserved")
+    reservation = InventoryReservation(id=str(uuid4()), case_id=case.id, sku=item.sku, quantity=lines[0].quantity, status="reserved", expires_at=datetime.now(timezone.utc) + timedelta(hours=24))
     stock.reserved_quantity += reservation.quantity; stock.version += 1
     fulfillment = ExchangeFulfillment(id=str(uuid4()), case_id=case.id, replacement_sku=item.sku, quantity=reservation.quantity, reservation_id=reservation.id, status="allocated")
     db.add_all([reservation, fulfillment]); _audit(db, case.id, "EXCHANGE_INVENTORY_RESERVED", f"已预占 {item.sku} x{reservation.quantity}。", "system", "inventory", reservation.id)
@@ -40,7 +41,7 @@ def release_exchange_reservation(db: Session, case: AfterSalesCase, reason: str)
     stock = db.scalar(select(InventoryStock).where(InventoryStock.sku == reservation.sku).with_for_update())
     if stock is not None:
         stock.reserved_quantity = max(0, stock.reserved_quantity - reservation.quantity); stock.version += 1
-    reservation.status = "released"
+    reservation.status, reservation.released_at, reservation.release_reason = "released", datetime.now(timezone.utc), reason
     fulfillment = db.scalar(select(ExchangeFulfillment).where(ExchangeFulfillment.case_id == case.id).with_for_update())
     if fulfillment is not None: fulfillment.status, fulfillment.failure_code, fulfillment.version = "cancelled", reason, fulfillment.version + 1
     _audit(db, case.id, "EXCHANGE_RESERVATION_RELEASED", reason, "system", "inventory", reservation.id)
@@ -61,3 +62,17 @@ def consume_exchange_reservation(db: Session, case: AfterSalesCase, tracking_num
     reservation.status = "consumed"; fulfillment.status, fulfillment.tracking_number, fulfillment.version = "shipped", tracking_number, fulfillment.version + 1
     _audit(db, case.id, "EXCHANGE_REPLACEMENT_SHIPPED", "替换商品已出库。", "system", "inventory", fulfillment.id)
     return fulfillment
+
+
+def release_expired_reservations(db: Session, now: datetime | None = None) -> int:
+    """Maintenance worker: expire unshipped inventory holds without touching consumed stock."""
+    now = now or datetime.now(timezone.utc); released = 0
+    rows = list(db.scalars(select(InventoryReservation).where(InventoryReservation.status == "reserved", InventoryReservation.expires_at.is_not(None), InventoryReservation.expires_at <= now).with_for_update(skip_locked=True)))
+    for reservation in rows:
+        case = db.get(AfterSalesCase, reservation.case_id)
+        if case is None: continue
+        if release_exchange_reservation(db, case, "RESERVATION_EXPIRED"):
+            case.status = "fulfillment_exception"
+            _incident(db, case, "EXCHANGE_RESERVATION_EXPIRED", "换货库存预占已过期，请重新选择换货或联系人工处理。")
+            released += 1
+    db.commit(); return released

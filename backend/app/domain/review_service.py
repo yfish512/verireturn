@@ -8,6 +8,10 @@ confirmable case in the same database transaction as the review decision.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
+import os
+from pathlib import Path
 from decimal import Decimal
 from uuid import uuid4
 
@@ -15,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import Actor, AfterSalesCase, AuditLog, IdempotencyRecord, PolicyVersion, ReviewEvent, ReviewTicket
+from ..models import Actor, AfterSalesCase, AuditLog, IdempotencyRecord, PolicyVersion, ReviewEvent, ReviewTicket, ReviewUpload
 from ..schemas import PolicyVersionPublishRequest, ReviewDecisionRequest, ReviewTicketCreateRequest
 from .policy import evaluate_review_disposition
 from .service import DomainError, PENDING_CONFIRMATION, get_owned_order, request_fingerprint
@@ -300,7 +304,38 @@ def decide_review_ticket(
     return _commit_or_replay(db, operator_id, operation, idempotency_key, payload_hash, ticket.id)
 
 
+def create_review_upload(db: Session, actor_id: str, filename: str, media_type: str, content_base64: str) -> ReviewUpload:
+    try:
+        raw = base64.b64decode(content_base64, validate=True)
+    except Exception as error:
+        raise DomainError("ATTACHMENT_CONTENT_INVALID", "附件内容不是有效 Base64。", 422) from error
+    if not raw or len(raw) > 5 * 1024 * 1024:
+        raise DomainError("ATTACHMENT_SIZE_INVALID", "附件必须介于 1 B 和 5 MB。", 422)
+    if media_type not in {"image/jpeg", "image/png", "application/pdf"}:
+        raise DomainError("ATTACHMENT_MEDIA_TYPE_INVALID", "仅支持 JPEG、PNG 或 PDF 审核材料。", 422)
+    digest = hashlib.sha256(raw).hexdigest()
+    existing = db.scalar(select(ReviewUpload).where(ReviewUpload.uploaded_by == actor_id, ReviewUpload.content_hash == digest))
+    if existing is not None:
+        return existing
+    upload_id = str(uuid4())
+    root = Path(os.getenv("REVIEW_UPLOAD_DIR", "data/review-uploads"))
+    target = root / actor_id / upload_id
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_bytes(raw)
+    os.replace(temporary, target)
+    row = ReviewUpload(id=upload_id, uploaded_by=actor_id, object_ref=f"uploads/{actor_id}/{upload_id}", content_hash=digest, media_type=media_type, byte_size=len(raw), status="ready")
+    db.add(row); db.commit()
+    return row
+
 def attach_review_evidence(db: Session, ticket_id: str, actor_id: str, object_ref: str, content_hash: str, media_type: str, expected_version: int, request_id: str | None = None):
+    if not object_ref.startswith(f"uploads/{actor_id}/"):
+        raise DomainError("ATTACHMENT_REFERENCE_DENIED", "附件必须使用当前客户的受控上传引用。", 403)
+    if media_type.lower() not in {"image/jpeg", "image/png", "application/pdf"}:
+        raise DomainError("ATTACHMENT_MEDIA_TYPE_INVALID", "仅支持 JPEG、PNG 或 PDF 审核材料。", 422)
+    upload = db.scalar(select(ReviewUpload).where(ReviewUpload.object_ref == object_ref).with_for_update())
+    if upload is None or upload.uploaded_by != actor_id or upload.status != "ready" or upload.content_hash != content_hash.lower() or upload.media_type != media_type:
+        raise DomainError("ATTACHMENT_UPLOAD_NOT_VERIFIED", "附件必须先经受控上传并且校验通过。", 409)
     from ..models import ReviewAttachment
     ticket = db.scalar(select(ReviewTicket).where(ReviewTicket.id == ticket_id).with_for_update())
     if ticket is None: raise DomainError("REVIEW_TICKET_NOT_FOUND", "审核单不存在。", 404)
@@ -312,3 +347,20 @@ def attach_review_evidence(db: Session, ticket_id: str, actor_id: str, object_re
     db.add(attachment); ticket.version += 1; ticket.status = "waiting_customer" if ticket.status == "open" else ticket.status
     _append_event(db, ticket, "CUSTOMER_ATTACHMENT_ADDED", {"attachment_id":attachment.id,"object_ref":object_ref,"content_hash":content_hash,"media_type":media_type}, actor_id, "customer", request_id)
     db.commit(); return attachment
+
+def expire_overdue_review_tickets(db: Session, now: datetime | None = None) -> int:
+    """SLA projection: terminally expire overdue tickets and leave an audit event.
+
+    A worker may run this repeatedly; row locks and the terminal-state predicate make
+    the transition idempotent across worker restarts.
+    """
+    now = now or datetime.now(timezone.utc)
+    tickets = list(db.scalars(select(ReviewTicket).where(
+        ReviewTicket.status.in_(("open", "claimed", "waiting_customer")), ReviewTicket.due_at < now
+    ).with_for_update()))
+    for ticket in tickets:
+        prior = ticket.status
+        ticket.status = "expired"; ticket.version += 1
+        _append_event(db, ticket, "REVIEW_SLA_EXPIRED", {"previous_status": prior, "due_at": ticket.due_at.isoformat()}, "review-sla-worker", "internal_service", None)
+    db.commit()
+    return len(tickets)

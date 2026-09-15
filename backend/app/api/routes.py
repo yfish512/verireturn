@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..auth import current_demo_user, request_id, require_internal_callback, require_legacy_fulfillment_simulator
 from ..database import get_db
+from ..security import validate_idempotency_key
+from ..domain.appointments import list_available_slots
 from ..domain.service import (
     DomainError,
     cancel_case,
@@ -37,7 +39,7 @@ def domain_http_error(error: DomainError) -> HTTPException:
 
 
 def idempotency_key(value: str = Header(alias="Idempotency-Key", min_length=8, max_length=128)) -> str:
-    return value
+    return validate_idempotency_key(value)
 
 
 @router.get("/orders/{order_id}")
@@ -74,6 +76,13 @@ def read_logistics(order_id: str, user_id: str = Depends(current_demo_user), db:
         return {"order_id": result.order_id, "status": result.status, "tracking_number": result.tracking_number}
     except DomainError as error:
         raise domain_http_error(error) from error
+
+
+@router.get("/pickup-slots")
+def read_pickup_slots(days: int = Query(default=7, ge=1, le=7), user_id: str = Depends(current_demo_user), db: Session = Depends(get_db)):
+    # Authentication is required even though availability itself has no customer-specific capacity rule.
+    if not user_id: raise HTTPException(status_code=401, detail={"code":"AUTHENTICATION_REQUIRED","message":"需要客户身份。"})
+    return list_available_slots(db, days=days)
 
 
 @router.post("/after-sales/eligibility", response_model=EligibilityResponse)

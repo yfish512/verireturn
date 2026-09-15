@@ -59,6 +59,9 @@ class M1ToolClient:
     def get_order(self, actor_id: str, order_id: str, request_id: str) -> dict[str, Any]:
         return self._request("GET", f"/tools/orders/{order_id}", actor_id, request_id)
 
+    def get_order_items(self, actor_id: str, order_id: str, request_id: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/tools/orders/{order_id}/items", actor_id, request_id)
+
     def get_logistics(self, actor_id: str, order_id: str, request_id: str) -> dict[str, Any]:
         return self._request("GET", f"/tools/orders/{order_id}/logistics", actor_id, request_id)
 
@@ -68,8 +71,10 @@ class M1ToolClient:
     def check_eligibility(self, actor_id: str, order_id: str, request_type: str, reason: str, request_id: str) -> dict[str, Any]:
         return self._request("POST", "/tools/after-sales/eligibility", actor_id, request_id, body={"order_id": order_id, "request_type": request_type, "reason": reason})
 
-    def create_case(self, actor_id: str, order_id: str, request_type: str, reason: str, request_id: str, idempotency_key: str) -> dict[str, Any]:
-        return self._request("POST", "/tools/after-sales/cases", actor_id, request_id, body={"order_id": order_id, "request_type": request_type, "reason": reason}, idempotency_key=idempotency_key)
+    def create_case(self, actor_id: str, order_id: str, request_type: str, reason: str, items: list[dict[str, Any]] | None, request_id: str, idempotency_key: str) -> dict[str, Any]:
+        body = {"order_id": order_id, "request_type": request_type, "reason": reason}
+        if items: body["items"] = items
+        return self._request("POST", "/tools/after-sales/cases", actor_id, request_id, body=body, idempotency_key=idempotency_key)
 
     def confirm_case(self, actor_id: str, case_id: int, request_id: str, idempotency_key: str) -> dict[str, Any]:
         return self._request("POST", f"/tools/after-sales/cases/{case_id}/confirm", actor_id, request_id, idempotency_key=idempotency_key)

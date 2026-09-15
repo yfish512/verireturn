@@ -17,7 +17,9 @@ class PaymentWebhook(BaseModel):
     event_id: str = Field(min_length=8, max_length=128)
     provider_refund_id: str = Field(min_length=8, max_length=128)
     outcome: str = Field(pattern="^(succeeded|failed)$")
-    amount: Decimal | None = None
+    amount: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
+    currency: str = Field(default="CNY", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    occurred_at: datetime
     payload: dict = Field(default_factory=dict)
     model_config={"extra":"forbid"}
 
@@ -34,8 +36,8 @@ async def payment_webhook(provider: str, request: Request, signature: str = Head
     if body.event_id != event_id: raise HTTPException(422, detail={"code":"PAYMENT_EVENT_ID_MISMATCH","message":"回调头与正文事件 ID 不一致。"})
     intent = db.scalar(select(RefundIntent).where(RefundIntent.provider == provider, RefundIntent.provider_refund_id == body.provider_refund_id))
     if intent is None: raise HTTPException(404, detail={"code":"REFUND_PROVIDER_REFERENCE_NOT_FOUND","message":"支付回调未关联退款意图。"})
-    if body.amount is not None and body.amount != intent.amount: raise HTTPException(422, detail={"code":"PAYMENT_AMOUNT_MISMATCH","message":"支付回调金额与退款意图不一致。"})
-    try: return _intent_dict(apply_refund_settlement(db, provider, body.provider_refund_id, body.outcome == "succeeded", body.event_id, {**body.payload, "amount": str(body.amount) if body.amount is not None else None}))
+    if body.amount != intent.amount or body.currency != intent.currency: raise HTTPException(422, detail={"code":"PAYMENT_AMOUNT_MISMATCH","message":"支付回调金额或币种与退款意图不一致。"})
+    try: return _intent_dict(apply_refund_settlement(db, provider, body.provider_refund_id, body.outcome == "succeeded", body.event_id, {**body.payload, "amount": str(body.amount), "currency": body.currency, "occurred_at": body.occurred_at.isoformat()}))
     except DomainError as exc: raise error(exc) from exc
 
 @payment_router.get("/ops/payments/refunds")
