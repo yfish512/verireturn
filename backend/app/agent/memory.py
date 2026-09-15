@@ -123,13 +123,11 @@ class TaskMemory:
     def _clarification(task: AgentTask) -> str:
         missing = task.missing_slots[0]
         if task.intent == "create_after_sales" and missing == "order_id":
-            evidence = task.slots_json.get("reason")
-            suffix = f"，已记录“{evidence}”" if evidence else ""
-            return f"我会为您发起退款申请{suffix}。请提供订单号，例如 O1001。"
+            return "可以，请提供订单号，例如 O1001。"
         if task.intent == "request_manual_review" and missing == "order_id":
             return "我可以为您准备人工审核申请。请提供订单号，例如 O1003。"
         if task.intent == "schedule_pickup" and missing == "time_slot":
-            return "请提供取件时段，例如“明天上午取件”。"
+            return "请提供取件时段，例如“明天上午”。"
         return f"请补充{_SLOT_LABELS.get(missing, missing)}。"
 
     def resolve(self, thread_id: str, actor_id: str, message_id: str, message: str, decision: IntentDecision) -> dict[str, Any]:
@@ -217,7 +215,7 @@ class TaskMemory:
             elif result.get("last_error_code") == "ORDER_NOT_FOUND":
                 bad_order = slots.pop("order_id", None)
                 task.phase, task.missing_slots = "collecting_slots", ["order_id"]
-                result = {**result, "response": f"未找到订单 {bad_order}。当前退款申请仍已保留，请重新提供订单号，例如 O1001。"}
+                result = {**result, "response": f"未找到 {bad_order}，请确认订单号。"}
                 event = "slot_validation_failed"
             else:
                 task.phase, task.missing_slots = "completed", []

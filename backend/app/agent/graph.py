@@ -169,7 +169,8 @@ class AgentGraph:
         )
         if created is None:
             return update
-        return {**update, "case_id": created["id"], "final_response": f"已创建待确认售后单 #{created['id']}，金额 {created['eligible_amount']} 元。"}
+        request_label = "退款" if state["request_type"] == "refund" else "换货"
+        return {**update, "case_id": created["id"], "final_response": f"已生成{request_label}申请，金额 {created['eligible_amount']} 元。请确认提交。"}
 
     def after_create(self, state: AgentState) -> str:
         return "create_confirmation" if state.get("case_id") and not state.get("final_response", "").startswith("暂不") else "finalize"
@@ -178,7 +179,7 @@ class AgentGraph:
         if state.get("confirmation_id"):
             return {}
         confirmation = self.traces.create_confirmation(state["thread_id"], state["run_id"], state["actor_id"], state["case_id"])
-        response = f"{state['final_response']} 请通过确认接口明确确认或取消，确认编号：{confirmation.id}。"
+        response = state["final_response"]
         self.traces.finish_run(state["run_id"], "awaiting_confirmation", response)
         return {"confirmation_id": confirmation.id, "final_response": response}
 
@@ -218,8 +219,8 @@ class AgentGraph:
             return update
         self.traces.resolve_confirmation(state["confirmation_id"], approved)
         if approved:
-            return {**update, "final_response": f"售后单 #{result['id']} 已确认。请告知可取件的时段，例如“明天上午取件”。"}
-        return {**update, "final_response": f"售后单 #{result['id']} 已取消。"}
+            return {**update, "final_response": "已提交退款申请。请提供上门取件时间，例如“明天上午”。"}
+        return {**update, "final_response": "已取消本次退款申请。"}
 
     def await_review_confirmation(self, state: AgentState) -> dict:
         decision = interrupt({"confirmation_id": state["confirmation_id"], "summary": state["final_response"], "type": "review_submission"})

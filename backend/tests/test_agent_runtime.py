@@ -1,9 +1,11 @@
+from types import SimpleNamespace
+
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from backend.app.agent.intent import KeywordIntentExtractor
+from backend.app.agent.intent import KeywordIntentExtractor, OpenAIIntentExtractor
 from backend.app.agent.knowledge import AgentKnowledgeService, ExtractiveAnswerGenerator
 from backend.app.agent.runtime import AgentSettings, build_agent_runtime
 from backend.app.agent.trace import TraceStore
@@ -89,6 +91,41 @@ def runtime(tmp_path):
     return agent, tools, sessions
 
 
+
+class FakeIntentClient:
+    def __init__(self, content: str):
+        self.content = content
+        self.calls: list[dict] = []
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))])
+
+
+def test_live_intent_fast_routes_clear_action_without_model_call():
+    extractor = OpenAIIntentExtractor("http://unused", "test-key", "test-model")
+    client = FakeIntentClient('{"intent":"knowledge_qa"}')
+    extractor.client = client
+
+    decision = extractor.extract("能帮我退一个没拆封的商品吗")
+
+    assert decision.intent == "create_after_sales"
+    assert decision.request_type == "refund"
+    assert client.calls == []
+
+
+def test_live_intent_keeps_policy_question_on_knowledge_route():
+    extractor = OpenAIIntentExtractor("http://unused", "test-key", "test-model")
+    client = FakeIntentClient('{"intent":"knowledge_qa"}')
+    extractor.client = client
+
+    decision = extractor.extract("退款政策和时效是什么？")
+
+    assert decision.intent == "knowledge_qa"
+    assert len(client.calls) == 1
+
 def test_agent_requires_structured_confirmation_before_confirming_case(tmp_path):
     agent, tools, sessions = runtime(tmp_path)
     result = agent.handle_message("thread-refund-1", "U001", "帮我退 O1001，商品没有拆封", "message-refund-1")
@@ -102,7 +139,7 @@ def test_agent_requires_structured_confirmation_before_confirming_case(tmp_path)
 
     resolved = agent.resolve_confirmation(result["confirmation_id"], "U001", True)
     assert resolved["status"] == "completed"
-    assert "已确认" in resolved["response"]
+    assert resolved["response"] == "已提交退款申请。请提供上门取件时间，例如“明天上午”。"
     assert [call[0] for call in tools.calls] == ["check_eligibility", "create_case", "confirm_case"]
     with sessions() as db:
         assert db.get(AgentConfirmation, result["confirmation_id"]).status == "approved"
@@ -138,7 +175,7 @@ def test_rejected_confirmation_calls_cancel_instead_of_confirm(tmp_path):
     created = agent.handle_message("thread-reject-1", "U001", "帮我退 O1001", "message-reject-1")
     resolved = agent.resolve_confirmation(created["confirmation_id"], "U001", False)
     assert resolved["status"] == "completed"
-    assert "已取消" in resolved["response"]
+    assert resolved["response"] == "已取消本次退款申请。"
     assert [call[0] for call in tools.calls] == ["check_eligibility", "create_case", "cancel_case"]
     with sessions() as db:
         assert db.get(AgentConfirmation, created["confirmation_id"]).status == "rejected"
@@ -222,7 +259,8 @@ def test_agent_knowledge_answer_has_a_valid_citation_and_never_calls_m1_tools(tm
     assert result["status"] == "completed"
     assert result["retrieval_id"]
     assert len(result["citations"]) == 1
-    assert "依据：《退款政策》v1" in result["response"]
+    assert "依据：" not in result["response"]
+    assert len(result["response"]) <= 200
     assert tools.calls == []
     with sessions() as db:
         calls = list(db.scalars(select(AgentToolCall).where(AgentToolCall.run_id == result["run_id"])))
@@ -244,14 +282,14 @@ def test_agent_retains_refund_task_through_wrong_then_correct_order_number(tmp_p
     agent, tools, _ = runtime(tmp_path)
     first = agent.handle_message("thread-memory-repair", "U001", "你帮我退一下商品吧，没拆封", "memory-message-1")
     assert first["status"] == "completed"
-    assert "订单号" in first["response"]
+    assert first["response"] == "可以，请提供订单号，例如 O1001。"
     assert first["memory"]["intent"] == "create_after_sales"
     assert first["memory"]["slots"]["request_type"] == "refund"
     assert first["memory"]["slots"]["reason"] == "你帮我退一下商品吧，没拆封"
     assert tools.calls == []
 
     wrong = agent.handle_message("thread-memory-repair", "U001", "O10001", "memory-message-2")
-    assert "未找到订单 O10001" in wrong["response"]
+    assert wrong["response"] == "未找到 O10001，请确认订单号。"
     assert wrong["memory"]["phase"] == "collecting_slots"
     assert wrong["memory"]["slots"].get("order_id") is None
 

@@ -68,6 +68,18 @@ class OpenAIIntentExtractor:
         # convention. Skip the model so no accidental M1 read/write can occur.
         if any(word in message for word in ("发票", "补发", "修改地址", "改地址", "支付", "直接完成")):
             return IntentDecision(intent="unknown")
+        # Clear operational requests are deterministic.  Routing them before
+        # the network call avoids both an avoidable model round trip and a
+        # generative misclassification as policy consultation.
+        fallback = self.fallback.extract(message)
+        fast_intents = {"create_after_sales", "request_manual_review", "schedule_pickup"}
+        if fallback.intent in fast_intents:
+            return fallback
+        if fallback.intent in {"query_order", "query_logistics"} and fallback.order_id:
+            return fallback
+        if fallback.intent == "query_fulfillment" and fallback.case_id:
+            return fallback
+
         response = self.client.chat.completions.create(
             model=self.model_name,
             temperature=0,
@@ -96,7 +108,6 @@ class OpenAIIntentExtractor:
         # The model may conservatively label a message containing an explicit
         # order operation as unknown. This fallback only supplies a constrained
         # intent from the same user text; it never supplies policy or identity.
-        fallback = self.fallback.extract(message)
         # M3 only permits quality-dispute refunds into the review workflow.
         # Quality exchanges remain on M1's deterministic automatic path.
         if decision.intent == "request_manual_review" and decision.request_type != "refund":

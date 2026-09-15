@@ -143,7 +143,7 @@ export function AgentShowcase() {
             {item.result?.status === "awaiting_confirmation" && item.result.confirmation_id ? <Alert className="agent-confirmation" type="warning" showIcon message="此操作会创建或提交售后业务请求" description={<Space wrap><Typography.Text>系统已保存待确认命令；确认前不会进入后续业务流程。</Typography.Text><Button type="primary" loading={confirming} onClick={() => void resolveConfirmation(item, true)}>确认执行</Button><Button loading={confirming} onClick={() => void resolveConfirmation(item, false)}>取消</Button></Space>} /> : null}
             {item.fulfillment && <Card size="small" className="agent-case-card" title={`售后单 #${item.fulfillment.case_id}`} extra={<Tag color={item.fulfillment.status === "completed" ? "green" : "blue"}>{item.fulfillment.status}</Tag>}><Timeline items={item.fulfillment.events.map((event) => ({ children: `${event.sequence_no}. ${event.event_type}` }))} /></Card>}
           </List.Item>} />}
-          {sending && <div className="agent-thinking"><Spin size="small" /> 正在解析意图、补全任务状态并调用受控工具…</div>}
+          {sending && <div className="agent-thinking"><Spin size="small" /> 正在处理…</div>}
           <Divider /><Input.TextArea value={draft} disabled={loadingThread} onChange={(event) => setDraft(event.target.value)} onPressEnter={(event) => { if (!event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="例如：帮我退 O1001，商品未拆封" autoSize={{ minRows: 3, maxRows: 6 }} />
           <div className="agent-compose-actions"><Typography.Text type="secondary">Enter 发送，Shift + Enter 换行</Typography.Text><Button type="primary" disabled={loadingThread || !threadId} loading={sending} onClick={() => void send()}>发送</Button></div>
         </Card></Col>
