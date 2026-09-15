@@ -4,12 +4,13 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Callable
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import AfterSalesCase, AuditLog, IdempotencyRecord, Logistics, Order
+from ..models import AfterSalesCase, AfterSalesItem, AuditLog, IdempotencyRecord, Logistics, Order, OrderItem
 from ..schemas import AfterSalesCreateRequest, EligibilityRequest
 from .policy import EligibilityDecision, evaluate_after_sales
 
@@ -153,6 +154,12 @@ def create_case(
         )
         db.add(case)
         db.flush()
+        item = db.scalar(select(OrderItem).where(OrderItem.order_id == request.order_id).with_for_update())
+        if item is None:
+            order = get_owned_order(db, user_id, request.order_id)
+            item = OrderItem(id=str(uuid4()), order_id=order.id, sku=f"legacy-{order.id}", title=order.item_name, quantity=1, unit_amount=order.amount)
+            db.add(item); db.flush()
+        db.add(AfterSalesItem(id=str(uuid4()), case_id=case.id, order_item_id=item.id, quantity=1, refund_amount=decision.eligible_amount))
         _audit(db, case.id, "CASE_CREATED", "售后单已创建，等待用户确认。", "customer", user_id, request_id)
         _record_idempotency(db, user_id, operation, idempotency_key, payload_hash, case.id)
         return _commit_or_replay(db, user_id, operation, idempotency_key, payload_hash, case.id)
