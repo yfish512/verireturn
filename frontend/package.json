@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.66.8",
+    "@tanstack/react-query": "^5.104.0",
     "antd": "^5.24.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
