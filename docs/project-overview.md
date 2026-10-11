@@ -47,6 +47,12 @@ flowchart LR
 - **身份与抗滥用**：开发身份适配器、生产 JWT/OIDC JWKS、服务端 RBAC、Redis 滑动窗口限流。
 - **审核材料**：受控上传记录所有者、哈希、MIME 和大小；绑定审核单时再次校验，不接受手填对象引用。
 
+## 4. 工具故障恢复实验
+
+Recovery 模块使用独立 LangGraph 工作流，比较普通 Agent、固定重试和受限恢复策略。它以固定种子在隔离 fixture 中注入库存服务临时不可用、退款提交结果未知和确认期间库存变化；恢复策略只能在“重试、核验领域事实、刷新状态、提供替代方案、转人工”中选择。评测单独报告自主完成、安全转人工、严重错误、二次确认和额外调用成本，避免将后端幂等或人工处理误算为 Agent 能力。
+
+详见 [Recovery 实验说明](recovery-experiment.md)。
+
 ## 4. 本地运行
 
 项目不依赖 Docker；Python、PostgreSQL 均在 Miniforge `verireturn` 环境内运行。

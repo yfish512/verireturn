@@ -532,7 +532,7 @@ class EvaluationResult(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     evaluation_run_id: Mapped[str] = mapped_column(ForeignKey("evaluation_runs.id"), index=True)
     case_id: Mapped[str] = mapped_column(String(128))
-    status: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32))
     latency_ms: Mapped[int] = mapped_column(Integer)
     evidence_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

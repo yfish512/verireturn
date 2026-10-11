@@ -12,6 +12,7 @@
 - 建设人工审核闭环：策略版本化、审核工单、乐观锁、SLA 超时、受控附件上传、客户隔离和审计事件。
 - 构建证据驱动知识问答：PostgreSQL `pgvector`、中文全文检索、版本化知识发布、检索引用与反馈闭环；RAG 不能决定业务事实。
 - 提供可观测与生产化基础：Trace 下钻、离线评测、指标告警、OIDC/JWKS 适配、RBAC、Redis 限流、PII 脱敏、数据保留和备份恢复脚本。
+- 实现 Recovery 故障恢复实验：以固定种子注入临时不可用、退款结果未知和库存变化，对照普通 Agent、固定重试与状态核验恢复策略，并记录安全性、成功率和额外调用成本。
 
 ## 技术栈
 
@@ -23,7 +24,7 @@
 - CI 自动执行 Python 测试、PostgreSQL migration upgrade/check 和前端生产构建。
 - 本地演示页提供对话、受控工具调用、确认命令、任务记忆和履约事实的可视化。
 
-整体业务流程、架构边界、故障恢复与本地运行方式见 [项目实现总览](docs/project-overview.md)。
+整体业务流程、架构边界与本地运行方式见 [项目实现总览](docs/project-overview.md)；故障恢复实验见 [Recovery 实验说明](docs/recovery-experiment.md)。
 
 ## License
 

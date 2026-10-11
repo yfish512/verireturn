@@ -305,8 +305,9 @@ def create_evaluation_run(db: Session, manager_id: str, suite_key: str, model_na
     suite = db.scalar(select(EvaluationSuite).where(EvaluationSuite.suite_key == suite_key).order_by(EvaluationSuite.version.desc()))
     if suite is None:
         raise DomainError("EVALUATION_SUITE_NOT_FOUND", "评测集不存在。", 404)
-    if prompt_version != "agent-prompt-v1":
-        raise DomainError("PROMPT_VERSION_NOT_SUPPORTED", "当前只支持已登记的 agent-prompt-v1。", 422)
+    expected_prompt = "recovery-prompt-v1" if suite_key == "recovery" else "agent-prompt-v1"
+    if prompt_version != expected_prompt:
+        raise DomainError("PROMPT_VERSION_NOT_SUPPORTED", f"评测集 {suite_key} 仅支持 {expected_prompt}。", 422)
     run = EvaluationRun(id=_id(), suite_id=suite.id, requested_by=manager_id, model_name=model_name, prompt_version=prompt_version)
     db.add(run)
     db.commit()

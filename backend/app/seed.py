@@ -77,7 +77,7 @@ def seed_demo_data(db: Session) -> None:
                 created_by="OPS_MANAGER", published_at=now,
             ))
     project = Path(__file__).resolve().parents[2]
-    for suite_key, case_path in (("m2", "evals/cases/m2_agent_cases.jsonl"), ("m3", "evals/cases/m3_agent_cases.jsonl"), ("m4", "evals/cases/m4_knowledge_agent_cases.jsonl"), ("m5", "evals/cases/m5_fulfillment_agent_cases.jsonl")):
+    for suite_key, case_path in (("m2", "evals/cases/m2_agent_cases.jsonl"), ("m3", "evals/cases/m3_agent_cases.jsonl"), ("m4", "evals/cases/m4_knowledge_agent_cases.jsonl"), ("m5", "evals/cases/m5_fulfillment_agent_cases.jsonl"), ("recovery", "evals/cases/recovery_agent_cases.jsonl")):
         if db.scalar(select(EvaluationSuite.id).where(EvaluationSuite.suite_key == suite_key, EvaluationSuite.version == 1)) is None:
             content = (project / case_path).read_bytes()
             db.add(EvaluationSuite(id=f"m6-suite-{suite_key}-v1", suite_key=suite_key, version=1, case_path=case_path, checksum=hashlib.sha256(content).hexdigest(), created_by="OPS_MANAGER"))

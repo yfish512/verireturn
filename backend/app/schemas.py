@@ -462,7 +462,7 @@ class TraceProjectionResponse(BaseModel):
 
 
 class EvaluationRunCreateRequest(BaseModel):
-    suite_key: str = Field(pattern=r"^m[2-5]$")
+    suite_key: str = Field(pattern=r"^(m[2-5]|recovery)$")
     model_name: str = Field(default="deepseek-v4-flash", min_length=3, max_length=128)
     prompt_version: str = Field(default="agent-prompt-v1", min_length=3, max_length=64)
     model_config = {"extra": "forbid"}
@@ -475,3 +475,10 @@ class EvaluationRunResponse(BaseModel):
 class EvaluationResultResponse(BaseModel):
     id: str; evaluation_run_id: str; case_id: str; status: str; latency_ms: int; evidence_json: dict; created_at: datetime
     model_config = {"from_attributes": True}
+
+class RecoveryCompareRequest(BaseModel):
+    scenario_ids: list[str] | None = Field(default=None, max_length=10)
+    seed: int = Field(default=20261012, ge=0, le=2_147_483_647)
+    planner_mode: Literal["bounded", "llm"] = "bounded"
+    model_name: str | None = Field(default=None, min_length=3, max_length=128)
+    model_config = {"extra": "forbid"}

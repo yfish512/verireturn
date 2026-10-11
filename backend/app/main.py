@@ -13,6 +13,7 @@ from .api.privacy_routes import privacy_router
 from .api.observability_routes import agent_feedback_router, ops_observability_router
 from .api.routes import router
 from .api.review_routes import customer_router as review_router, ops_router
+from .api.recovery_routes import recovery_router
 from .database import DATABASE_URL, Base, SessionLocal, engine
 from .seed import seed_demo_data
 from .domain.observability import overview
@@ -49,6 +50,7 @@ app.include_router(payment_router)
 app.include_router(privacy_router)
 app.include_router(agent_feedback_router)
 app.include_router(ops_observability_router)
+app.include_router(recovery_router)
 
 @app.middleware("http")
 async def enforce_rate_limit(request: Request, call_next):

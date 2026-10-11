@@ -5,7 +5,7 @@ from pathlib import Path
 from backend.app.database import SessionLocal
 from backend.app.domain.observability import claim_one_evaluation_run, finish_evaluation_run
 
-RUNNERS = {"m2": "evals.run_m2_evals", "m3": "evals.run_m3_evals", "m4": "evals.run_m4_evals", "m5": "evals.run_m5_evals"}
+RUNNERS = {"m2": "evals.run_m2_evals", "m3": "evals.run_m3_evals", "m4": "evals.run_m4_evals", "m5": "evals.run_m5_evals", "recovery": "evals.run_recovery_evals"}
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -27,7 +27,10 @@ def main() -> None:
             report_path = report_file.name
         env = os.environ.copy()
         env["LLM_MODEL"] = run.model_name
-        command = [sys.executable, "-m", RUNNERS[suite.suite_key], "--base-url", env.get("EVAL_BASE_URL", "http://127.0.0.1:8000"), "--database-url", env["DATABASE_URL"], "--cases", str(case_path.relative_to(PROJECT_ROOT)), "--report", report_path]
+        if suite.suite_key == "recovery":
+            command = [sys.executable, "-m", RUNNERS[suite.suite_key], "--cases", str(case_path.relative_to(PROJECT_ROOT)), "--report", report_path]
+        else:
+            command = [sys.executable, "-m", RUNNERS[suite.suite_key], "--base-url", env.get("EVAL_BASE_URL", "http://127.0.0.1:8000"), "--database-url", env["DATABASE_URL"], "--cases", str(case_path.relative_to(PROJECT_ROOT)), "--report", report_path]
         result = subprocess.run(command, cwd=PROJECT_ROOT, env=env, text=True, capture_output=True, timeout=900)
         report = json.loads(Path(report_path).read_text(encoding="utf-8")) if Path(report_path).exists() else None
         with SessionLocal() as db:
