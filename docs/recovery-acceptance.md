@@ -21,6 +21,8 @@
 | 异步评测 | 真实 API 提交的 v3 数据套件完成 900 条离线策略结果；Worker 逐条保存、心跳、租约 fencing，结果分页可读取 |
 | 原始结果完整性 | 正式 600、无故障 60、重复 60、离线故障 900、离线无故障 900、专项 94 条结果归档；离线校验工具验证 SHA256 与最终业务事实 |
 
+补充修复 CI 的容器数据库初始化和知识权限测试对本地权重缓存的依赖；无 `.env`、无模型缓存的干净 checkout 119 项通过，空 PostgreSQL 数据库从零迁移与 check 通过。见 [干净 checkout](recovery-evidence/clean-checkout-tests.txt) 和 [空库迁移](recovery-evidence/clean-database-migration.txt)。
+
 所有模型规划请求共享持久化 3000 次上限；实际累计见 [预算快照](recovery-evidence/budget.json)。未用新预算键绕过上限，也没有因失败从正式报告中剔除任务。
 
 ### 故障与业务边界覆盖

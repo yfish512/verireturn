@@ -1,0 +1,62 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20260913_0001, Create the initial VeriReturn business schema.
+INFO  [alembic.runtime.migration] Running upgrade 20260913_0001 -> 20260913_0002, Store business times as UTC-aware timestamps.
+INFO  [alembic.runtime.migration] Running upgrade 20260913_0002 -> 20260913_0003, Add M1 state-machine audit and generic idempotency guards.
+INFO  [alembic.runtime.migration] Running upgrade 20260913_0003 -> 20260913_0004, Enforce append-only audit logs in PostgreSQL.
+INFO  [alembic.runtime.migration] Running upgrade 20260913_0004 -> 20260914_0005, Add M2 Agent runs, tool traces and confirmations.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0005 -> 20260914_0006, Add M3 policy versions and append-only review workflow.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0006 -> 20260914_0007, Remove the review/source-case FK cycle.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0007 -> 20260914_0008, Add persisted confirmation before an Agent submits a review ticket.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0008 -> 20260914_0009, Enforce one published immutable policy version.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0009 -> 20260914_0010, Use text comparison for PostgreSQL JSON policy payloads.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0010 -> 20260914_0011, Add M4 versioned, permission-scoped knowledge base and pgvector storage.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0011 -> 20260914_0012, Allow a complete permission scope in knowledge retrieval audit logs.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0012 -> 20260914_0013, Add reliable M5 fulfillment outbox, inbox and operational incidents.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0013 -> 20260914_0014, Add ORM-declared M5 foreign-key lookup indexes.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0014 -> 20260914_0015, Add M6 observability, alerts and evaluation governance.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0015 -> 20260914_0016, Make M6 operational evidence append-only in PostgreSQL.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0016 -> 20260914_0017, Make published M6 alert rules historically immutable.
+INFO  [alembic.runtime.migration] Running upgrade 20260914_0017 -> 20260915_0018, Add explicit customer conversation task memory.
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0018 -> 20260915_0019, Index task-memory event message references.
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0019 -> 20260915_0020, Add durable payment and refund ledger.
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0020 -> 20260915_0021, Add payment ledger lookup indexes.
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0021 -> 20260915_0022, Add payment callback inbox and reconciliation records.
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0022 -> 20260915_0023, Add order-line and exchange inventory foundations.
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0023 -> 20260915_0024, Complete P0-P2 task, exchange, privacy and RBAC foundations.
+Revision ID: 20260915_0024
+Revises: 20260915_0023
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0024 -> 20260915_0025, Allow production finance and review roles.
+Revision ID: 20260915_0025
+Revises: 20260915_0024
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0025 -> 20260915_0026, Enforce inventory reservation lifecycle.
+Revision ID: 20260915_0026
+Revises: 20260915_0025
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0026 -> 20260915_0027, Store payment callback financial facts for M10 reconciliation.
+Revision ID: 20260915_0027
+Revises: 20260915_0026
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0027 -> 20260915_0028, Add structured pickup appointments and expiring inventory holds.
+Revision ID: 20260915_0028
+Revises: 20260915_0027
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0028 -> 20260915_0029, Add controlled review upload metadata.
+Revision ID: 20260915_0029
+Revises: 20260915_0028
+INFO  [alembic.runtime.migration] Running upgrade 20260915_0029 -> 20261012_0030, Allow explicit Recovery evaluation outcomes.
+Revision ID: 20261012_0030
+Revises: 20260915_0029
+INFO  [alembic.runtime.migration] Running upgrade 20261012_0030 -> 14addcc6afc0, durable recovery and customer resolutions
+INFO  [alembic.runtime.migration] Running upgrade 14addcc6afc0 -> 20261012_0032, Explicit customer resolution and restock task phases.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.schemas
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.tables
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.types
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.constraints
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.defaults
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.comments
+INFO  [alembic.ddl.postgresql] Detected sequence named 'review_events_id_seq' as owned by integer column 'review_events(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'agent_tool_calls_id_seq' as owned by integer column 'agent_tool_calls(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'idempotency_records_id_seq' as owned by integer column 'idempotency_records(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'audit_logs_id_seq' as owned by integer column 'audit_logs(id)', assuming SERIAL and omitting
+INFO  [alembic.ddl.postgresql] Detected sequence named 'after_sales_cases_id_seq' as owned by integer column 'after_sales_cases(id)', assuming SERIAL and omitting
+No new upgrade operations detected.

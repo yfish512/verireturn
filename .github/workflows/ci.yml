@@ -30,7 +30,7 @@ jobs:
         env:
           POSTGRES_USER: verireturn
           POSTGRES_PASSWORD: verireturn
-          POSTGRES_DB: postgres
+          POSTGRES_DB: verireturn_ci_migration
         ports: ["54329:5432"]
         options: >-
           --health-cmd "pg_isready -U verireturn -d postgres"

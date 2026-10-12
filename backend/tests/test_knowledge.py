@@ -153,6 +153,9 @@ def test_failed_ingestion_job_can_be_requeued_without_creating_a_duplicate(tmp_p
 
 
 def test_knowledge_api_enforces_manager_write_and_customer_scope(tmp_path, monkeypatch):
+    # Authorization must not depend on cached model weights or a network download.
+    # Use the same embedding adapter for indexing and querying this API fixture.
+    monkeypatch.setattr("backend.app.domain.knowledge.get_embedding_provider", lambda: DeterministicEmbeddings())
     engine = create_engine(f"sqlite:///{tmp_path / 'knowledge-api-test.db'}", connect_args={"check_same_thread": False})
     sessions = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
