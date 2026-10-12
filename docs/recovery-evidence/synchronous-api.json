@@ -1,0 +1,8 @@
+{
+  "compare": {
+    "http_status": 200,
+    "total": 9,
+    "failed": 0
+  },
+  "paged_results": 2
+}

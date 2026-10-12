@@ -1,0 +1,1 @@
+{"customer_refresh_restore": true, "comparison_rendered": true, "customer_reconfirmation": false, "browser_errors": [], "screenshots": ".local/recovery-v2-browser"}

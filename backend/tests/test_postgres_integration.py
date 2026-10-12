@@ -359,7 +359,7 @@ def test_postgres_m6_metric_window_and_evaluation_queue_are_single_claim(postgre
     assert results.count(run_id) == 1
     assert results.count(None) == 1
     with sessions() as db:
-        finish_evaluation_run(db, run_id, {"failed": 0, "results": [{"id": "m6-evidence", "status": "passed", "duration_ms": 1}]})
+        finish_evaluation_run(db, run_id, {"failed": 0, "results": [{"id": "m6-evidence", "status": "passed", "duration_ms": 1}]}, lease_token=db.get(__import__("backend.app.models", fromlist=["EvaluationRun"]).EvaluationRun, run_id).lease_token)
         evidence = db.scalar(select(EvaluationResult).where(EvaluationResult.evaluation_run_id == run_id))
         evidence.status = "tampered"
         with pytest.raises(DBAPIError):
@@ -441,4 +441,91 @@ def test_postgres_agent_task_memory_events_are_append_only(postgres_url):
         with pytest.raises(DBAPIError):
             db.commit()
         db.rollback()
+    engine.dispose()
+
+
+def test_postgres_recovery_budget_reservations_are_atomic(postgres_url):
+    from backend.app.recovery.budget import ModelBudget,BudgetExhausted
+    engine=create_engine(postgres_url);sessions=sessionmaker(bind=engine)
+    budget=ModelBudget(sessions,key='postgres-budget-test',limit=5)
+    def charge(_):
+        try:budget.reserve();return True
+        except BudgetExhausted:return False
+    with ThreadPoolExecutor(max_workers=8) as pool:results=list(pool.map(charge,range(20)))
+    assert sum(results)==5 and budget.snapshot()['used_calls']==5
+    engine.dispose()
+
+
+def test_postgres_expired_evaluation_owner_is_fenced(postgres_url):
+    from datetime import timedelta
+    from backend.app.domain.observability import append_evaluation_result,heartbeat_evaluation
+    from backend.app.models import EvaluationRun
+    engine=create_engine(postgres_url);sessions=sessionmaker(bind=engine)
+    with sessions() as db:
+        seed_demo_data(db);run=create_evaluation_run(db,'OPS_MANAGER','recovery','deepseek-v4-flash','recovery-prompt-v2')
+        first,_=claim_one_evaluation_run(db);first_token=first.lease_token
+        assert first.id==run.id
+        db.get(EvaluationRun,run.id).lease_until=datetime.now(timezone.utc)-timedelta(seconds=1);db.commit()
+        second,_=claim_one_evaluation_run(db)
+        assert second.lease_token!=first_token
+        with pytest.raises(DomainError):append_evaluation_result(db,run.id,first_token,{'id':'stale','status':'safe_failure'})
+        db.rollback();heartbeat_evaluation(db,run.id,second.lease_token)
+        append_evaluation_result(db,run.id,second.lease_token,{'id':'current','status':'safe_failure'})
+        finish_evaluation_run(db,run.id,{'failed':0,'results':[]},lease_token=second.lease_token)
+    engine.dispose()
+
+
+def _postgres_resolution_case(sessions,tag,alternate):
+    from backend.app.models import Order,OrderItem,InventoryStock,ReplacementOption
+    from decimal import Decimal
+    with sessions() as db:
+        oid='REC-'+tag;sku='SKU-'+tag
+        db.add(Order(id=oid,user_id='U001',item_name=tag,amount=Decimal('100'),delivered_at=datetime.now(timezone.utc),condition='sealed',quality_issue=True));db.flush()
+        db.add(OrderItem(id='LINE-'+tag,order_id=oid,sku=sku,title=tag,quantity=1,unit_amount=Decimal('100')))
+        db.add(InventoryStock(sku=sku,available_quantity=0,reserved_quantity=0));db.flush()
+        db.add(ReplacementOption(id=tag,original_sku=sku,replacement_sku=alternate));db.commit()
+        case=create_case(db,'U001',AfterSalesCreateRequest(order_id=oid,request_type='exchange',reason='质量问题'),'rec-create-'+tag)
+        case=confirm_case(db,'U001',case.id,'rec-confirm-'+tag)
+        assert case.status=='fulfillment_exception'
+        return case.id
+
+
+def test_postgres_concurrent_resolution_reserves_stock_once(postgres_url):
+    from backend.app.domain.resolutions import propose_resolution,confirm_resolution
+    from backend.app.models import InventoryStock,InventoryReservation
+    engine=create_engine(postgres_url);sessions=sessionmaker(bind=engine)
+    with sessions() as db:
+        db.add(InventoryStock(sku='REC-ALT-ONLY',available_quantity=1,reserved_quantity=0));db.commit()
+    case_ids=[_postgres_resolution_case(sessions,f'resolution-{i}','REC-ALT-ONLY') for i in range(2)]
+    proposals=[]
+    for cid in case_ids:
+        with sessions() as db:proposals.append(propose_resolution(db,'U001',cid,'exchange',f'proposal-{cid}','REC-ALT-ONLY').id)
+    def confirm_once(pid):
+        with sessions() as db:
+            try:return confirm_resolution(db,'U001',pid,1,True).status
+            except DomainError as e:db.rollback();return e.code
+    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(confirm_once,proposals))
+    assert results.count('applied')==1 and results.count('RESOLUTION_STALE')==1
+    with sessions() as db:
+        assert db.get(InventoryStock,'REC-ALT-ONLY').reserved_quantity==1
+        assert db.scalar(select(func.count()).select_from(InventoryReservation).where(InventoryReservation.case_id.in_(case_ids)))==1
+    engine.dispose()
+
+
+def test_postgres_exchange_to_refund_is_linked_and_atomic(postgres_url):
+    from backend.app.domain.resolutions import propose_resolution,confirm_resolution
+    from backend.app.models import AfterSalesResolution,AfterSalesItem
+    engine=create_engine(postgres_url);sessions=sessionmaker(bind=engine)
+    cid=_postgres_resolution_case(sessions,'resolution-refund','REC-ALT-ONLY')
+    with sessions() as db:
+        row=propose_resolution(db,'U001',cid,'refund','convert-refund')
+        with pytest.raises(DomainError):confirm_resolution(db,'U002',row.id,1,True)
+        db.rollback()
+        row=confirm_resolution(db,'U001',row.id,1,True)
+        assert row.linked_case_id is not None
+        assert db.get(AfterSalesCase,cid).status=='cancelled'
+        linked=db.get(AfterSalesCase,row.linked_case_id)
+        assert linked.request_type=='refund' and linked.eligible_amount==100
+        assert len(list(db.scalars(select(AfterSalesItem).where(AfterSalesItem.case_id==linked.id))))==1
+        assert confirm_resolution(db,'U001',row.id,1,True).linked_case_id==linked.id
     engine.dispose()

@@ -33,6 +33,8 @@ class AgentState(TypedDict, total=False):
     citations: list[str]
     final_response: str
     intent_resolved: bool
+    recovery_id: str
+    recovery_status: str
     last_error_code: str
 
 
@@ -59,6 +61,22 @@ class AgentGraph:
                 state["run_id"], sequence, node, tool_name, arguments, None, request_id,
                 int((time.perf_counter() - started) * 1000), "failed", error.code,
             )
+            from ..recovery.live import OPERATIONS
+            if tool_name in OPERATIONS and error.status_code >= 500:
+                from ..recovery.live import create_live_recovery, run_live, WRITES
+                recovery_args = {**arguments}
+                if tool_name in {"create_after_sales_case", "check_after_sales_eligibility"}:
+                    recovery_args["reason"] = state.get("reason") or state["message"]
+                    recovery_args["items"] = state.get("items")
+                recovery_id = create_live_recovery(self.traces.session_factory, state, tool_name, recovery_args,
+                    observation={"error": "result_unknown" if tool_name in WRITES else "temporarily_unavailable", "message": error.message})
+                recovered = run_live(self.traces.session_factory, state["actor_id"], recovery_id, self.tools)
+                update = {"tool_sequence": sequence, "recovery_id": recovery_id, "recovery_status": recovered["terminal"]}
+                if recovered["terminal"] == "tool_recovered":
+                    self.traces.record_tool_call(state["run_id"], sequence+1, "recovery", tool_name, recovery_args, recovered["tool_result"],
+                        request_id+":recovered", 0, "succeeded")
+                    return recovered["tool_result"], {**update, "tool_sequence": sequence+1}
+                return None, {**update, "last_error_code": error.code, "final_response": recovered["response"]}
             if error.code == "ORDER_ITEMS_REQUIRED":
                 response = "该订单有多个商品。请告诉我需要售后的商品和数量，或在订单商品列表中选择。"
             elif error.code == "ORDER_ITEM_QUANTITY_INVALID":
@@ -172,7 +190,7 @@ class AgentGraph:
                 choices = "；".join(f"{item['title']}（可售后 {item['available_after_sales_quantity']} 件）" for item in order_items)
                 return {**update, "last_error_code": "ORDER_ITEMS_REQUIRED", "final_response": f"请选择需要售后的商品和数量：{choices}。"}
             if order_items:
-                state = {**state, "items": [{"order_item_id": order_items[0]["id"], "quantity": 1}]}
+                state = {**state, **update, "items": [{"order_item_id": order_items[0]["id"], "quantity": 1}]}
         # The model may summarize away evidence terms (for example “损坏”).
         # Policy routing must evaluate the immutable user input, not that
         # lossy summary; the model only chooses this bounded workflow.
@@ -243,7 +261,13 @@ class AgentGraph:
             return update
         self.traces.resolve_confirmation(state["confirmation_id"], approved)
         if approved:
-            return {**update, "final_response": "已提交退款申请。请提供上门取件时间，例如“明天上午”。"}
+            if result.get("status") == "fulfillment_exception":
+                from ..recovery.live import create_live_recovery, run_live
+                recovery_id = create_live_recovery(self.traces.session_factory, state, "confirm_after_sales_case", {"case_id":state["case_id"]},
+                    observation={"error":"stock_changed","message":"确认时库存不足，原换货未分配库存。"})
+                recovered = run_live(self.traces.session_factory,state["actor_id"],recovery_id,self.tools)
+                return {**update,"recovery_id":recovery_id,"recovery_status":recovered["terminal"],"final_response":"库存已变化，请选择新的售后方案并确认。"}
+            return {**update, "final_response": f"已提交{'换货' if state.get('request_type') == 'exchange' else '退款'}申请。请提供上门取件时间，例如“明天上午”。"}
         return {**update, "final_response": "已取消本次退款申请。"}
 
     def await_review_confirmation(self, state: AgentState) -> dict:

@@ -57,12 +57,13 @@ class AgentRuntime:
 
     def thread_snapshot(self, thread_id: str, actor_id: str, *, before_sequence: int | None = None, limit: int = 30) -> dict:
         try:
+            self.memory.reconcile_business_tasks(thread_id, actor_id)
             return self.memory.snapshot(thread_id, actor_id, before_sequence=before_sequence, limit=limit)
         except ThreadAccessError as error:
             raise AgentRuntimeError("THREAD_NOT_FOUND", str(error)) from error
 
     def reconcile(self) -> int:
-        return self.memory.reconcile_confirmed_after_sales()
+        return self.memory.reconcile_confirmed_after_sales() + self.memory.reconcile_business_tasks()
 
     def list_tasks(self, thread_id: str, actor_id: str) -> list[dict]:
         try: return self.memory.list_tasks(thread_id, actor_id)
@@ -98,9 +99,10 @@ class AgentRuntime:
         return result
 
     @staticmethod
-    def _response(thread_id: str, run_id: str, status: str, response: str, *, confirmation_id=None, case_id=None, ticket_id=None, retrieval_id=None, citations=None, memory=None, last_error_code=None) -> dict:
+    def _response(thread_id: str, run_id: str, status: str, response: str, *, confirmation_id=None, case_id=None, ticket_id=None, retrieval_id=None, citations=None, memory=None, last_error_code=None, recovery_id=None, recovery_status=None) -> dict:
         result = {
             "thread_id": thread_id, "run_id": run_id, "status": status, "response": response,
+            "recovery_id": recovery_id, "recovery_status": recovery_status,
             "confirmation_id": confirmation_id, "case_id": case_id, "ticket_id": ticket_id,
             "retrieval_id": retrieval_id, "citations": citations or [], "memory": memory,
         }
@@ -166,11 +168,12 @@ class AgentRuntime:
             }, config)
         except Exception as error:
             self.traces.finish_run(run_id, "failed", "Agent 执行失败，请稍后重试。", "AGENT_RUNTIME_ERROR")
-            raise AgentRuntimeError("AGENT_RUNTIME_ERROR", str(error)) from error
+            raise AgentRuntimeError("AGENT_RUNTIME_ERROR", "执行遇到异常，请稍后重试。") from error
         if graph_result.get("__interrupt__"):
             result = self._response(thread_id, run_id, "awaiting_confirmation", graph_result["final_response"], confirmation_id=graph_result.get("confirmation_id"), case_id=graph_result.get("case_id"), ticket_id=graph_result.get("review_ticket_id"), retrieval_id=graph_result.get("retrieval_id"), citations=graph_result.get("citations", []))
         else:
             result = self._response(thread_id, run_id, "completed", graph_result.get("final_response", "处理完成。"), case_id=graph_result.get("case_id"), ticket_id=graph_result.get("review_ticket_id"), retrieval_id=graph_result.get("retrieval_id"), citations=graph_result.get("citations", []), last_error_code=graph_result.get("last_error_code"))
+        result["recovery_id"], result["recovery_status"] = graph_result.get("recovery_id"), graph_result.get("recovery_status")
         result, memory = self.memory.finish_execution(thread_id, record_id, run_id, result)
         result["memory"] = memory
         result.pop("last_error_code", None)
@@ -202,10 +205,11 @@ class AgentRuntime:
             graph_result = self.graph.invoke(Command(resume={"approved": approved}), config)
         except Exception as error:
             self.traces.finish_run(active_confirmation.run_id, "failed", "确认处理失败，请稍后重试。", "CONFIRMATION_RUNTIME_ERROR")
-            raise AgentRuntimeError("CONFIRMATION_RUNTIME_ERROR", str(error)) from error
+            raise AgentRuntimeError("CONFIRMATION_RUNTIME_ERROR", "确认执行遇到异常，请稍后重试。") from error
         case_id = confirmation.case_id if confirmation is not None else None
         memory = self.memory.finish_confirmation(active_confirmation.thread_id, actor_id, approved, case_id)
         result = self._response(active_confirmation.thread_id, active_confirmation.run_id, "completed", graph_result.get("final_response", "确认处理完成。"), confirmation_id=confirmation_id, case_id=case_id, ticket_id=graph_result.get("review_ticket_id"), retrieval_id=graph_result.get("retrieval_id"), citations=graph_result.get("citations", []), memory=memory)
+        result["recovery_id"], result["recovery_status"] = graph_result.get("recovery_id"), graph_result.get("recovery_status")
         self.memory.append_control_reply(active_confirmation.thread_id, result)
         return result
 

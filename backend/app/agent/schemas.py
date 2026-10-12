@@ -28,6 +28,8 @@ class AgentMessageRequest(BaseModel):
 
 
 class AgentMessageResponse(BaseModel):
+    recovery_id: str | None = None
+    recovery_status: str | None = None
     thread_id: str
     run_id: str
     status: Literal["completed", "awaiting_confirmation", "failed"]

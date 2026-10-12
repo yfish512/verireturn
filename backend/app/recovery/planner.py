@@ -30,7 +30,7 @@ class BoundedRecoveryPlanner:
 class OpenAIRecoveryPlanner:
     """Optional model planner; bounded JSON action validation remains local."""
     def __init__(self, base_url: str, api_key: str, model: str):
-        self.client, self.model = OpenAI(base_url=base_url, api_key=api_key), model
+        self.client, self.model = OpenAI(base_url=base_url, api_key=api_key, timeout=25, max_retries=0), model
         self.fallback = BoundedRecoveryPlanner()
 
     def choose(self, *, strategy: Strategy, failure_code: str, allowed_actions: list[str], context: dict) -> RecoveryDecision:
@@ -48,6 +48,6 @@ class OpenAIRecoveryPlanner:
             action = payload.get("action")
             if action in allowed_actions:
                 return RecoveryDecision(action, str(payload.get("reason") or "模型选择的允许恢复动作。")[:300])
-        except Exception:
-            pass
-        return self.fallback.choose(strategy=strategy, failure_code=failure_code, allowed_actions=allowed_actions, context=context)
+        except Exception as error:
+            raise RuntimeError("RECOVERY_MODEL_DECISION_FAILED") from error
+        raise RuntimeError("RECOVERY_MODEL_ACTION_INVALID")

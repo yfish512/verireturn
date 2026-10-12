@@ -40,6 +40,11 @@ def evaluate(cases: Iterable[dict], *, planner_mode: str = "bounded", model_name
     payment state for later strategies; this is essential for a fair comparison.
     """
     cases = list(cases)
+    if cases and cases[0].get("schema_version") == 2:
+        from .evaluate_v2 import evaluate_v2
+        return evaluate_v2(cases, planner_mode=planner_mode, model_name=model_name)
+    if planner_mode == "llm":
+        raise ValueError("Live evaluation requires the v2 corpus and budgeted planner")
     rows: list[dict] = []
     errors: list[str] = []
     planner = planner_from_env(planner_mode, model_name=model_name)

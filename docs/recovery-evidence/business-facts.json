@@ -1,0 +1,61 @@
+[
+  {
+    "case_id": 145,
+    "status": "completed",
+    "type": "refund",
+    "refund_status": "succeeded",
+    "exchange_status": null,
+    "lines": [
+      {
+        "quantity": 1,
+        "refunded_quantity": 1
+      }
+    ],
+    "audit": [
+      "CASE_CREATED_BY_RESOLUTION",
+      "PICKUP_APPOINTMENT_RESERVED",
+      "PICKUP_SCHEDULED",
+      "FULFILLMENT_PICKED_UP",
+      "REFUND_INTENT_CREATED",
+      "FULFILLMENT_RETURN_RECEIVED",
+      "REFUND_SUBMITTED",
+      "REFUND_SETTLED"
+    ],
+    "payment_events": [
+      {
+        "event_id": "payment-demo-1791792352",
+        "outcome": "succeeded",
+        "amount": "88.00"
+      }
+    ]
+  },
+  {
+    "case_id": 146,
+    "status": "completed",
+    "type": "exchange",
+    "refund_status": null,
+    "exchange_status": "delivered",
+    "lines": [
+      {
+        "quantity": 1,
+        "refunded_quantity": 0
+      }
+    ],
+    "audit": [
+      "CASE_CREATED",
+      "EXCHANGE_STOCK_EXCEPTION",
+      "CASE_CONFIRMED",
+      "RESOLUTION_PROPOSED",
+      "EXCHANGE_INVENTORY_RESERVED",
+      "RESOLUTION_CONFIRMED",
+      "PICKUP_APPOINTMENT_RESERVED",
+      "PICKUP_SCHEDULED",
+      "FULFILLMENT_PICKED_UP",
+      "FULFILLMENT_RETURN_RECEIVED",
+      "EXCHANGE_REPLACEMENT_SHIPPED",
+      "FULFILLMENT_REPLACEMENT_SHIPPED",
+      "FULFILLMENT_REPLACEMENT_DELIVERED"
+    ],
+    "payment_events": []
+  }
+]

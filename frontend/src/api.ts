@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTaskCancelResult, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection, PickupSlot, OrderLine } from "./types";
+import type { CustomerRecovery, Resolution, AgentMessage, AgentTaskCancelResult, AgentTaskMemory, AgentThreadSnapshot, AgentToolCall, AlertRuleVersion, EvaluationResult, EvaluationRun, FulfillmentIncident, FulfillmentStatus, KnowledgeDocument, KnowledgeAudience, MetricSnapshot, Metrics, ObservabilityOverview, OpsAlert, ReviewEvent, Ticket, TicketStatus, TraceProjection, PickupSlot, OrderLine } from "./types";
 
 const actorId = () => localStorage.getItem("verireturn.opsActor") || "OPS001";
 const idempotency = () => `ops-ui-${crypto.randomUUID()}`;
@@ -83,6 +83,11 @@ export const api = {
   agentFulfillment: (actor: string, caseId: number) => request<FulfillmentStatus>(`/tools/after-sales/cases/${caseId}/fulfillment`, {
     headers: { "X-Demo-User-Id": actor },
   }),
+  customerRecovery: (actor:string,id:string) => request<CustomerRecovery>(`/agent/recoveries/${id}`,{headers:{"X-Demo-User-Id":actor}}),
+  proposeResolution: (actor:string,caseId:number,option:{option:string;replacement_sku?:string}) => request<Resolution>(`/tools/after-sales/cases/${caseId}/resolutions`,{method:"POST",headers:{"X-Demo-User-Id":actor,"Idempotency-Key":idempotency()},body:JSON.stringify(option)}),
+  confirmResolution: (actor:string,id:string,version:number,approved:boolean) => request<Resolution>(`/tools/after-sales/resolutions/${id}/confirm`,{method:"POST",headers:{"X-Demo-User-Id":actor},body:JSON.stringify({expected_version:version,approved})}),
+  resumeRecovery: (actor:string,id:string,version:number) => request(`/agent/recoveries/${id}/resume`,{method:"POST",headers:{"X-Demo-User-Id":actor},body:JSON.stringify({expected_version:version})}),
+  cancelRecovery: (actor:string,id:string,version:number) => request(`/agent/recoveries/${id}/cancel`,{method:"POST",headers:{"X-Demo-User-Id":actor},body:JSON.stringify({expected_version:version})}),
   actorId,
   setActorId: (id: string) => localStorage.setItem("verireturn.opsActor", id),
 };

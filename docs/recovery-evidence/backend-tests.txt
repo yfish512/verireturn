@@ -1,0 +1,9 @@
+..............................................................ssssssssss [ 53%]
+ssssss.........................................................          [100%]
+=============================== warnings summary ===============================
+../miniforge3/envs/verireturn/lib/python3.11/site-packages/starlette/testclient.py:53
+  /data/user004/miniforge3/envs/verireturn/lib/python3.11/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+119 passed, 16 skipped, 1 warning in 25.33s

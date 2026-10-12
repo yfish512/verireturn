@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 
 class ToolError(Exception):
@@ -32,7 +31,6 @@ class M1ToolClient:
             headers["Idempotency-Key"] = idempotency_key
         return headers
 
-    @retry(retry=retry_if_exception_type(httpx.RequestError), stop=stop_after_attempt(3), wait=wait_exponential(min=0.1, max=1), reraise=True)
     def _transport(
         self, method: str, path: str, actor_id: str, request_id: str, *, body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,

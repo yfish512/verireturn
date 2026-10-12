@@ -182,6 +182,11 @@ def _apply_inbox_locked(db: Session, inbox: InboxEvent, case: AfterSalesCase) ->
             return inbox.status
     if target_status == COMPLETED:
         case.completed_at = utcnow()
+        if case.request_type == "exchange":
+            from ..models import ExchangeFulfillment
+            fulfilled = db.scalar(select(ExchangeFulfillment).where(ExchangeFulfillment.case_id == case.id).with_for_update())
+            if fulfilled is not None:
+                fulfilled.status, fulfilled.version = "delivered", fulfilled.version + 1
     inbox.status, inbox.rejection_code, inbox.applied_at = "applied", None, utcnow()
     db.add(FulfillmentEvent(
         id=_new_id(), case_id=case.id, inbox_event_id=inbox.id, provider=inbox.provider,

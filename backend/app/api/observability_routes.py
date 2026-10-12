@@ -135,7 +135,7 @@ def read_trace(run_id: str | None = None, case_id: int | None = None, _: ActorCo
 @ops_observability_router.post("/evaluation-runs", response_model=EvaluationRunResponse, status_code=202)
 def queue_evaluation(body: EvaluationRunCreateRequest, actor: ActorContext = Depends(require_ops_manager), db: Session = Depends(get_db)):
     try:
-        return _evaluation_response(db, create_evaluation_run(db, actor.id, body.suite_key, body.model_name, body.prompt_version))
+        return _evaluation_response(db, create_evaluation_run(db, actor.id, body.suite_key, body.model_name, body.prompt_version, body.model_dump(exclude={"suite_key", "model_name", "prompt_version"})))
     except DomainError as exc:
         raise error(exc) from exc
 
@@ -146,9 +146,11 @@ def read_evaluation_runs(_: ActorContext = Depends(require_operator), db: Sessio
 
 
 @ops_observability_router.get("/evaluation-runs/{run_id}/results", response_model=list[EvaluationResultResponse])
-def read_evaluation_results(run_id: str, _: ActorContext = Depends(require_operator), db: Session = Depends(get_db)):
+def read_evaluation_results(run_id: str, _: ActorContext = Depends(require_operator), db: Session = Depends(get_db), limit: int = 1000, offset: int = 0, strategy: str | None = None, scenario_id: str | None = None):
     try:
-        return list_evaluation_results(db, run_id)
+        if not 1 <= limit <= 1000 or offset < 0:
+            raise DomainError("PAGINATION_INVALID", "分页参数无效。", 422)
+        return list_evaluation_results(db, run_id, limit=limit, offset=offset, strategy=strategy, scenario_id=scenario_id)
     except DomainError as exc:
         raise error(exc) from exc
 
@@ -159,6 +161,6 @@ def _evaluation_response(db: Session, run) -> dict:
     return {
         "id": run.id, "suite_id": run.suite_id, "suite_key": suite.suite_key if suite else "unknown",
         "requested_by": run.requested_by, "model_name": run.model_name, "prompt_version": run.prompt_version,
-        "status": run.status, "attempts": run.attempts, "report_json": run.report_json,
+        "status": run.status, "attempts": run.attempts, "report_json": ({k:v for k,v in run.report_json.items() if k != "results"} if run.report_json and run.report_json.get("schema_version") == 2 else run.report_json),
         "last_error": run.last_error, "created_at": run.created_at, "finished_at": run.finished_at,
     }

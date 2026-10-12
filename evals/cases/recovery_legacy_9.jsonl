@@ -1,0 +1,9 @@
+{"id":"inventory-101","scenario_id":"inventory_temporarily_unavailable","seed":101}
+{"id":"inventory-202","scenario_id":"inventory_temporarily_unavailable","seed":202}
+{"id":"inventory-303","scenario_id":"inventory_temporarily_unavailable","seed":303}
+{"id":"refund-101","scenario_id":"refund_outcome_unknown","seed":101}
+{"id":"refund-202","scenario_id":"refund_outcome_unknown","seed":202}
+{"id":"refund-303","scenario_id":"refund_outcome_unknown","seed":303}
+{"id":"stock-change-101","scenario_id":"inventory_changed_during_confirmation","seed":101}
+{"id":"stock-change-202","scenario_id":"inventory_changed_during_confirmation","seed":202}
+{"id":"stock-change-303","scenario_id":"inventory_changed_during_confirmation","seed":303}

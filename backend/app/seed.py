@@ -85,5 +85,14 @@ def seed_demo_data(db: Session) -> None:
         # new version rather than silently changing historical evaluations.
         if latest is None or latest.checksum != checksum:
             version = (latest.version if latest is not None else 0) + 1
-            db.add(EvaluationSuite(id=f"m6-suite-{suite_key}-v{version}", suite_key=suite_key, version=version, case_path=case_path, checksum=checksum, created_by="OPS_MANAGER"))
+            db.add(EvaluationSuite(id=f"m6-suite-{suite_key}-v{version}", suite_key=suite_key, version=version, case_path=case_path, content_snapshot=content.decode("utf-8"), checksum=checksum, created_by="OPS_MANAGER"))
+    # Backfill replayable historical content only when its checksum matches.
+    archives = [project / "evals/cases/recovery_legacy_9.jsonl", project / "evals/cases/recovery_legacy_300.jsonl"]
+    for suite in db.scalars(select(EvaluationSuite).where(EvaluationSuite.content_snapshot.is_(None))):
+        for candidate in [project / suite.case_path, *archives]:
+            if candidate.is_file():
+                raw = candidate.read_bytes()
+                if hashlib.sha256(raw).hexdigest() == suite.checksum:
+                    suite.content_snapshot = raw.decode("utf-8")
+                    break
     db.commit()

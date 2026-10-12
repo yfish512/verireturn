@@ -48,7 +48,7 @@ def test_metric_worker_snapshots_alerts_and_versioned_triage(tmp_path):
     db.commit()
     job = queue_metric_job(db, current - timedelta(minutes=5), current + timedelta(minutes=1))
     assert process_one_metric_job(db) == job.id
-    assert db.scalar(select(func.count()).select_from(MetricSnapshot).where(MetricSnapshot.computation_job_id == job.id)) == 7
+    assert db.scalar(select(func.count()).select_from(MetricSnapshot).where(MetricSnapshot.computation_job_id == job.id)) == 9
     alert = db.scalar(select(OpsAlert).where(OpsAlert.rule_version_id == "m6-test-rule"))
     assert alert.status == "open"
     acknowledged = transition_alert(db, alert.id, "OPS001", alert.version, "acknowledged")

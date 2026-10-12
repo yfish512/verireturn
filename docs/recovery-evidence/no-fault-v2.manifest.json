@@ -1,0 +1,8 @@
+{
+  "cases": "b450d86ef95dde2402a5b104020cd377da103d26ad416f7c1e083eea639b81c4",
+  "planner": "llm",
+  "model": null,
+  "strategies": null,
+  "repetitions": 1,
+  "prompt": "recovery-prompt-v2"
+}

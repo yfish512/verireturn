@@ -328,6 +328,10 @@ class TaskMemory:
             if approved and case_id is not None and task.intent == "create_after_sales":
                 task.intent, task.phase, task.missing_slots, task.active_case_id = "schedule_pickup", "awaiting_pickup_slot", ["time_slot"], case_id
                 slots = dict(task.slots_json); slots["case_id"] = case_id; slots["time_slot"] = None; task.slots_json = slots
+                from ..models import AfterSalesCase
+                business_case = db.get(AfterSalesCase, case_id)
+                if business_case and business_case.status == "fulfillment_exception":
+                    task.intent, task.phase, task.missing_slots = "create_after_sales", "awaiting_resolution", []
                 event = "confirmation_approved"
             else:
                 task.phase, task.missing_slots = ("cancelled", []) if not approved else ("completed", [])
@@ -450,7 +454,9 @@ class TaskMemory:
                 slots = dict(task.slots_json)
                 slots["case_id"], slots["time_slot"] = confirmation.case_id, None
                 task.intent = "schedule_pickup"
-                task.phase = "awaiting_pickup_slot"
+                from ..models import AfterSalesCase
+                business_case = db.get(AfterSalesCase, confirmation.case_id)
+                task.phase = "awaiting_resolution" if business_case and business_case.status == "fulfillment_exception" else "awaiting_pickup_slot"
                 task.missing_slots = ["time_slot"]
                 task.active_case_id = confirmation.case_id
                 task.slots_json = slots
@@ -475,10 +481,55 @@ class TaskMemory:
             rows.reverse()
             task = self._focused_task(db, thread)
             tasks = list(db.scalars(select(AgentTask).where(AgentTask.thread_id == thread_id).order_by(AgentTask.updated_at.desc())))
+            projected_messages=[]
+            for row in rows:
+                payload=dict(row.payload_json) if row.payload_json else None
+                if payload and payload.get("status")=="awaiting_confirmation" and payload.get("confirmation_id"):
+                    from ..models import AgentReviewConfirmation
+                    confirmation=db.get(AgentConfirmation,payload["confirmation_id"]) or db.get(AgentReviewConfirmation,payload["confirmation_id"])
+                    if confirmation and confirmation.actor_id==actor_id:
+                        expires=confirmation.expires_at
+                        if expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
+                        current="expired" if confirmation.status=="pending" and expires<=datetime.now(timezone.utc) else confirmation.status
+                        payload["confirmation_state"]=current
+                        if current!="pending":payload["status"]="failed" if current=="expired" else "completed"
+                projected_messages.append({"id":row.id,"role":row.role,"content":row.content,"payload":payload})
             return {
                 "thread_id": thread_id,
-                "messages": [{"id": row.id, "role": row.role, "content": row.content, "payload": row.payload_json} for row in rows],
+                "messages": projected_messages,
                 "task": self._projection(task),
                 "tasks": [self._projection(item) for item in tasks],
                 "next_before_sequence": rows[0].sequence_no if has_more and rows else None,
             }
+
+    def reconcile_business_tasks(self, thread_id: str | None = None, actor_id: str | None = None) -> int:
+        """Repair projections from committed cases/resolutions, including conversion crashes."""
+        from ..models import AfterSalesCase, AfterSalesResolution
+        repaired=0
+        with self.session_factory() as db:
+            query=select(AgentTask).where(AgentTask.active_case_id.is_not(None),AgentTask.phase.in_(("awaiting_pickup_slot","awaiting_resolution","waiting_stock")))
+            if thread_id:
+                thread=db.get(AgentThread,thread_id)
+                if not thread or thread.actor_id!=actor_id:raise ThreadAccessError("会话不存在。")
+                query=query.where(AgentTask.thread_id==thread_id)
+            for task in db.scalars(query.with_for_update(skip_locked=True)):
+                case=db.get(AfterSalesCase,task.active_case_id)
+                if not case:continue
+                linked=db.scalar(select(AfterSalesResolution).where(AfterSalesResolution.case_id==case.id,
+                    AfterSalesResolution.status=='applied',AfterSalesResolution.linked_case_id.is_not(None)).order_by(AfterSalesResolution.created_at.desc()))
+                changed=False
+                if linked:
+                    task.active_case_id=linked.linked_case_id;case=db.get(AfterSalesCase,linked.linked_case_id)
+                    task.slots_json={**task.slots_json,'case_id':case.id,'request_type':case.request_type,'time_slot':None};task.intent='schedule_pickup';changed=True
+                phase=task.phase;missing=task.missing_slots
+                if case.status=='completed':phase,missing='completed',[]
+                elif case.status=='cancelled':phase,missing='cancelled',[]
+                elif case.status=='awaiting_pickup':phase,missing='awaiting_pickup_slot',['time_slot']
+                elif case.status=='fulfillment_exception':
+                    waiting=db.scalar(select(AfterSalesResolution.id).where(AfterSalesResolution.case_id==case.id,AfterSalesResolution.status=='waiting_stock'))
+                    phase,missing=('waiting_stock' if waiting else 'awaiting_resolution'),[]
+                if changed or phase!=task.phase or missing!=task.missing_slots:
+                    task.phase,task.missing_slots=phase,missing;task.version+=1
+                    self._event(db,task,'business_projection_recovered',{'case_id':case.id,'status':case.status},None);repaired+=1
+            db.commit()
+        return repaired

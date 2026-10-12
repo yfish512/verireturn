@@ -48,7 +48,7 @@ export interface EvaluationResult { id: string; evaluation_run_id: string; case_
 export interface AgentTaskMemory {
   task_id: string;
   intent: string;
-  phase: "collecting_slots" | "ready_to_execute" | "awaiting_customer_confirmation" | "awaiting_pickup_slot" | "completed" | "cancelled" | "expired";
+  phase: "collecting_slots" | "ready_to_execute" | "awaiting_customer_confirmation" | "awaiting_pickup_slot" | "awaiting_resolution" | "waiting_stock" | "completed" | "cancelled" | "expired";
   slots: Record<string, unknown>;
   missing_slots: string[];
   case_id: number | null;
@@ -60,6 +60,8 @@ export interface AgentMessage {
   run_id: string;
   status: "completed" | "awaiting_confirmation" | "failed";
   response: string;
+  recovery_id?: string | null;
+  recovery_status?: string | null;
   confirmation_id: string | null;
   case_id: number | null;
   ticket_id: string | null;
@@ -104,3 +106,6 @@ export interface FulfillmentStatus {
 export interface PickupSlot { start_at: string; end_at: string; timezone: string; label: string; available: number; }
 
 export interface OrderLine { id: string; sku: string; title: string; quantity: number; refunded_quantity: number; available_after_sales_quantity: number; unit_amount: string; }
+
+export interface CustomerRecovery { id:string; status:string; version:number; case_id:number|null; options:Array<{option:string;replacement_sku?:string}>|null; steps:Array<{sequence_no:number;kind:string;detail:Record<string,unknown>}>; next_before:number|null; }
+export interface Resolution { id:string; case_id:number; option:string; replacement_sku:string|null; status:string; version:number; expires_at:string; linked_case_id:number|null; }

@@ -112,6 +112,9 @@ def process_one_metric_job(db: Session) -> str | None:
             "fulfillment.outbox_pending": Decimal(db.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status.in_(("pending", "processing", "dead")))) or 0),
             "fulfillment.incidents_open": Decimal(db.scalar(select(func.count()).select_from(FulfillmentIncident).where(FulfillmentIncident.status.in_(("open", "acknowledged")))) or 0),
         }
+        from ..models import RecoveryExecution, RecoveryModelBudget
+        metrics["recovery.pending"] = Decimal(db.scalar(select(func.count()).select_from(RecoveryExecution).where(RecoveryExecution.status.in_(("pending", "running", "awaiting_customer", "waiting_stock")))) or 0)
+        metrics["recovery.model_calls"] = Decimal(db.scalar(select(func.coalesce(func.sum(RecoveryModelBudget.used_calls), 0))) or 0)
         for name, value in metrics.items():
             _snapshot(db, job, name, value)
         db.flush()
@@ -301,14 +304,33 @@ def overview(db: Session) -> dict:
     return {"metrics": metrics, "alerts_open": alerts_open}
 
 
-def create_evaluation_run(db: Session, manager_id: str, suite_key: str, model_name: str, prompt_version: str) -> EvaluationRun:
+def create_evaluation_run(db: Session, manager_id: str, suite_key: str, model_name: str, prompt_version: str, options: dict | None = None) -> EvaluationRun:
     suite = db.scalar(select(EvaluationSuite).where(EvaluationSuite.suite_key == suite_key).order_by(EvaluationSuite.version.desc()))
     if suite is None:
         raise DomainError("EVALUATION_SUITE_NOT_FOUND", "评测集不存在。", 404)
     expected_prompt = "recovery-prompt-v1" if suite_key == "recovery" else "agent-prompt-v1"
-    if prompt_version != expected_prompt:
+    supported = {expected_prompt, "recovery-prompt-v2", "recovery-prompt-v3"} if suite_key == "recovery" else {expected_prompt}
+    if prompt_version not in supported:
         raise DomainError("PROMPT_VERSION_NOT_SUPPORTED", f"评测集 {suite_key} 仅支持 {expected_prompt}。", 422)
-    run = EvaluationRun(id=_id(), suite_id=suite.id, requested_by=manager_id, model_name=model_name, prompt_version=prompt_version)
+    if suite_key == "recovery":
+        from ..auth import AuthSettings
+        if AuthSettings().app_env.lower() == "production":
+            raise DomainError("FAULT_DEMO_DISABLED", "生产环境禁用故障实验。", 403)
+        from ..recovery.evaluate_v2 import implementation_checksum
+        options = {**(options or {}), "implementation_checksum": implementation_checksum()}
+        mode = options.get("planner_mode", "bounded")
+        if mode == "llm":
+            from ..recovery.evaluate_v2 import PROMPT_VERSION
+            if prompt_version != PROMPT_VERSION:
+                raise DomainError("PROMPT_VERSION_NOT_SUPPORTED", f"当前真实模型实验使用 {PROMPT_VERSION}，历史实验请使用归档源码。", 422)
+            from ..agent.runtime import AgentSettings
+            settings = AgentSettings()
+            if not all((settings.llm_base_url, settings.llm_api_key, model_name)):
+                raise DomainError("RECOVERY_LLM_CONFIGURATION_REQUIRED", "真实模型评测需要配置模型地址和密钥。", 422)
+        strategies = options.get("strategies") or []
+        if (mode != "llm" and "react_baseline" in strategies) or len(strategies) != len(set(strategies)):
+            raise DomainError("RECOVERY_STRATEGIES_INVALID", "策略必须唯一，普通模型 Agent 需要真实模型模式。", 422)
+    run = EvaluationRun(id=_id(), suite_id=suite.id, requested_by=manager_id, model_name=model_name, prompt_version=prompt_version, options_json=options or {})
     db.add(run)
     db.commit()
     return run
@@ -318,10 +340,17 @@ def list_evaluation_runs(db: Session, limit: int = 50) -> list[EvaluationRun]:
     return list(db.scalars(select(EvaluationRun).order_by(EvaluationRun.created_at.desc()).limit(limit)))
 
 
-def list_evaluation_results(db: Session, run_id: str) -> list[EvaluationResult]:
+def list_evaluation_results(db: Session, run_id: str, *, limit: int = 1000, offset: int = 0, strategy: str | None = None, scenario_id: str | None = None) -> list[EvaluationResult]:
     if db.get(EvaluationRun, run_id) is None:
         raise DomainError("EVALUATION_RUN_NOT_FOUND", "评测运行不存在。", 404)
-    return list(db.scalars(select(EvaluationResult).where(EvaluationResult.evaluation_run_id == run_id).order_by(EvaluationResult.case_id)))
+    if not 1 <= limit <= 1000 or offset < 0:
+        raise DomainError("PAGINATION_INVALID", "分页参数无效。", 422)
+    query = select(EvaluationResult).where(EvaluationResult.evaluation_run_id == run_id)
+    if strategy:
+        query = query.where(EvaluationResult.evidence_json["strategy"].as_string() == strategy)
+    if scenario_id:
+        query = query.where(EvaluationResult.evidence_json["scenario_id"].as_string() == scenario_id)
+    return list(db.scalars(query.order_by(EvaluationResult.case_id, EvaluationResult.id).offset(offset).limit(limit)))
 
 
 def claim_one_evaluation_run(db: Session) -> tuple[EvaluationRun, EvaluationSuite] | None:
@@ -334,6 +363,7 @@ def claim_one_evaluation_run(db: Session) -> tuple[EvaluationRun, EvaluationSuit
     if suite is None:
         raise DomainError("EVALUATION_SUITE_NOT_FOUND", "评测集不存在。", 500)
     run.status, run.attempts, run.lease_until = "running", run.attempts + 1, current + timedelta(minutes=15)
+    run.lease_token = _id()
     db.commit()
     db.refresh(run)
     db.refresh(suite)
@@ -342,17 +372,43 @@ def claim_one_evaluation_run(db: Session) -> tuple[EvaluationRun, EvaluationSuit
     return run, suite
 
 
-def finish_evaluation_run(db: Session, run_id: str, report: dict | None, error: str | None = None) -> EvaluationRun:
+def finish_evaluation_run(db: Session, run_id: str, report: dict | None, error: str | None = None, *, lease_token: str | None = None) -> EvaluationRun:
     run = db.scalar(select(EvaluationRun).where(EvaluationRun.id == run_id).with_for_update())
     if run is None:
         raise DomainError("EVALUATION_RUN_NOT_FOUND", "评测运行不存在。", 404)
+    if run.status == "running":
+        require_evaluation_lease(run, lease_token)
     for item in (report or {}).get("results", []):
         case_id = str(item.get("id", "unknown"))
         existing = db.scalar(select(EvaluationResult).where(EvaluationResult.evaluation_run_id == run.id, EvaluationResult.case_id == case_id))
         if existing is None:
             db.add(EvaluationResult(id=_id(), evaluation_run_id=run.id, case_id=case_id, status=str(item.get("status", "failed")), latency_ms=int(item.get("duration_ms", 0)), evidence_json={key: value for key, value in item.items() if key != "id"}))
-    failed = bool(error) or int((report or {}).get("failed", 1)) > 0
+    failed = bool(error) or int((report or {}).get("failed", 1)) > 0 or not (report or {}).get("complete", True)
     run.status, run.lease_until, run.finished_at = ("failed" if failed else "succeeded"), None, now()
-    run.report_json, run.last_error = report, error
+    run.report_json = {k:v for k,v in report.items() if k != "results"} if report and report.get("schema_version") == 2 else report
+    run.last_error = error
     db.commit()
     return run
+
+
+def require_evaluation_lease(run, token):
+    expiry = run.lease_until
+    if expiry and expiry.tzinfo is None: expiry = expiry.replace(tzinfo=timezone.utc)
+    if run.status != "running" or not token or run.lease_token != token or not expiry or expiry <= now():
+        raise DomainError("EVALUATION_LEASE_LOST", "评测租约已失效。", 409)
+
+
+def heartbeat_evaluation(db, run_id, token):
+    run=db.scalar(select(EvaluationRun).where(EvaluationRun.id==run_id).with_for_update())
+    require_evaluation_lease(run,token)
+    run.lease_until=now()+timedelta(minutes=15);db.commit()
+
+
+def append_evaluation_result(db, run_id, token, item):
+    run=db.scalar(select(EvaluationRun).where(EvaluationRun.id==run_id).with_for_update())
+    require_evaluation_lease(run,token)
+    existing=db.scalar(select(EvaluationResult).where(EvaluationResult.evaluation_run_id==run_id,EvaluationResult.case_id==item["id"]))
+    if not existing:
+        db.add(EvaluationResult(id=_id(),evaluation_run_id=run_id,case_id=item["id"],status=item["status"],latency_ms=item.get("duration_ms",0),
+            evidence_json={k:v for k,v in item.items() if k!="id"}))
+    run.lease_until=now()+timedelta(minutes=15);db.commit()

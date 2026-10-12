@@ -499,6 +499,7 @@ class EvaluationSuite(Base):
     suite_key: Mapped[str] = mapped_column(String(64))
     version: Mapped[int] = mapped_column(Integer)
     case_path: Mapped[str] = mapped_column(String(256))
+    content_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     checksum: Mapped[str] = mapped_column(String(64))
     created_by: Mapped[str] = mapped_column(ForeignKey("actors.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -519,6 +520,8 @@ class EvaluationRun(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    options_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     report_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -700,7 +703,7 @@ class AgentTask(Base):
     __tablename__ = "agent_tasks"
     __table_args__ = (
         CheckConstraint(
-            "phase IN ('collecting_slots', 'ready_to_execute', 'awaiting_customer_confirmation', 'awaiting_pickup_slot', 'completed', 'cancelled', 'expired')",
+            "phase IN ('collecting_slots', 'ready_to_execute', 'awaiting_customer_confirmation', 'awaiting_pickup_slot', 'awaiting_resolution', 'waiting_stock', 'completed', 'cancelled', 'expired')",
             name="ck_agent_task_phase",
         ),
     )
@@ -945,3 +948,66 @@ class PrivacyRequest(Base):
     result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReplacementOption(Base):
+    __tablename__ = "replacement_options"
+    __table_args__ = (UniqueConstraint("original_sku", "replacement_sku", name="uq_replacement_option"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    original_sku: Mapped[str] = mapped_column(String(64))
+    replacement_sku: Mapped[str] = mapped_column(ForeignKey("inventory_stock.sku"))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AfterSalesResolution(Base):
+    __tablename__ = "after_sales_resolutions"
+    __table_args__ = (UniqueConstraint("case_id", "idempotency_key", name="uq_resolution_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("after_sales_cases.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    option: Mapped[str] = mapped_column(String(32))
+    replacement_sku: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    linked_case_id: Mapped[int | None] = mapped_column(ForeignKey("after_sales_cases.id"), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    snapshot_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_confirmation")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class RecoveryExecution(Base):
+    __tablename__ = "recovery_executions"
+    __table_args__ = (UniqueConstraint("actor_id", "command_key", name="uq_recovery_command"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    thread_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("after_sales_cases.id"), nullable=True)
+    command_key: Mapped[str] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    state_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class RecoveryStep(Base):
+    __tablename__ = "recovery_steps"
+    __table_args__ = (UniqueConstraint("execution_id", "sequence_no", name="uq_recovery_step"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("recovery_executions.id"), index=True)
+    sequence_no: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    detail_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class RecoveryModelBudget(Base):
+    __tablename__ = "recovery_model_budgets"
+    __table_args__ = (CheckConstraint("used_calls >= 0 AND used_calls <= max_calls", name="ck_recovery_budget"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    max_calls: Mapped[int] = mapped_column(Integer, default=3000)
+    used_calls: Mapped[int] = mapped_column(Integer, default=0)

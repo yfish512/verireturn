@@ -35,7 +35,9 @@ body { margin: 0; background: #f5f7fa; font-family: Inter, "PingFang SC", sans-s
 .agent-thinking { padding: 12px 0; color: #667085; }
 .agent-compose-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
 .agent-side-stack { width: 100%; }
-.agent-side-stack > .ant-space-item { width: 100%; }
+.agent-side-stack > .ant-space-item { width: 100%; min-width: 0; }
+.agent-side-stack .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.agent-side-stack .ant-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 
 @media (max-width: 720px) {
   .agent-header { height: auto; min-height: 64px; padding: 10px 16px; align-items: flex-start; flex-direction: column; }

@@ -462,6 +462,11 @@ class TraceProjectionResponse(BaseModel):
 
 
 class EvaluationRunCreateRequest(BaseModel):
+    planner_mode: Literal["bounded", "llm"] = "bounded"
+    strategies: list[Literal["baseline", "fixed_retry", "react_baseline", "recovery_agent"]] | None = Field(default=None, min_length=1, max_length=4)
+    repetitions: int = Field(default=1, ge=1, le=3)
+    max_model_calls: int = Field(default=4, ge=1, le=4)
+    max_tool_calls: int = Field(default=8, ge=1, le=8)
     suite_key: str = Field(pattern=r"^(m[2-5]|recovery)$")
     model_name: str = Field(default="deepseek-v4-flash", min_length=3, max_length=128)
     prompt_version: str = Field(default="agent-prompt-v1", min_length=3, max_length=64)

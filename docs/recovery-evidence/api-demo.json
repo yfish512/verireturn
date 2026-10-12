@@ -1,0 +1,10 @@
+{
+  "thread_id": "5bee7e92-15c1-4177-8283-fbdd2dd8f15f",
+  "recovery_id": "bb358e61-5c19-4d5f-8a74-2c3da2d7f20f",
+  "refund_case_id": 145,
+  "refund_status": "succeeded",
+  "exchange_case_id": 146,
+  "exchange_status": "completed",
+  "cross_customer_denied": true,
+  "callback_replay_safe": true
+}
