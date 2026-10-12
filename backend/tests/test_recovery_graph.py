@@ -2,6 +2,22 @@ from backend.app.recovery.graph import RecoveryGraph
 from backend.app.recovery.scenarios import ScenarioHarness
 
 
+def test_recovery_evaluation_corpus_has_300_balanced_seeded_episodes():
+    import json
+    from collections import Counter
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "evals/cases/recovery_agent_cases.jsonl"
+    cases = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(cases) == 300
+    assert Counter(item["scenario_id"] for item in cases) == {
+        "inventory_temporarily_unavailable": 100,
+        "refund_outcome_unknown": 100,
+        "inventory_changed_during_confirmation": 100,
+    }
+    assert len({item["seed"] for item in cases}) == 300
+
+
 def run(scenario, strategy):
     return RecoveryGraph(ScenarioHarness(scenario, seed=20261012), strategy).run()
 

@@ -39,6 +39,7 @@ def evaluate(cases: Iterable[dict], *, planner_mode: str = "bounded", model_name
     Fresh fixtures prevent an earlier strategy from consuming stock or changing
     payment state for later strategies; this is essential for a fair comparison.
     """
+    cases = list(cases)
     rows: list[dict] = []
     errors: list[str] = []
     planner = planner_from_env(planner_mode, model_name=model_name)
@@ -61,8 +62,11 @@ def evaluate(cases: Iterable[dict], *, planner_mode: str = "bounded", model_name
     for item in rows:
         if item["status"] != "harness_error": grouped[item["strategy"]].append(item)
     return {
-        "suite": "recovery", "planner_mode": planner_mode, "total": len(rows), "failed": len(errors),
-        "errors": errors, "results": rows, "metrics_by_strategy": {strategy: _aggregate(grouped[strategy]) for strategy in STRATEGIES},
+        "suite": "recovery", "planner_mode": planner_mode,
+        "episodes": len(cases),
+        "scenario_families": sorted({item.get("scenario_id") for item in cases}),
+        "total": len(rows), "failed": len(errors), "errors": errors, "results": rows,
+        "metrics_by_strategy": {strategy: _aggregate(grouped[strategy]) for strategy in STRATEGIES},
     }
 
 def default_cases() -> list[dict]:
