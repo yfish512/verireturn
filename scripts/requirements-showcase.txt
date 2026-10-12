@@ -1,0 +1,2 @@
+# Optional, only needed to regenerate the public figures.
+matplotlib>=3.9,<4

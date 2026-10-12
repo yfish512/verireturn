@@ -116,4 +116,4 @@ mamba run -n verireturn python -m scripts.verify_recovery_browser --exercise-cho
 
 归档的正式 CLI 结果可运行 `python -m scripts.import_recovery_report` 导入开发运营台；保留原 Prompt、套件快照和导入校验和，不重新请求模型，也不冒充新一轮实验。
 
-浏览器可通过 `PLAYWRIGHT_CHROMIUM_PATH` 指定已有 Chromium。演示不接入真实支付账户；JWT/OIDC、支付 Provider 生产替换和真实用户分布仍需要部署验证。完整验收与简历表述见 [验收报告](recovery-acceptance.md)。
+浏览器可通过 `PLAYWRIGHT_CHROMIUM_PATH` 指定已有 Chromium。演示不接入真实支付账户；JWT/OIDC、支付 Provider 生产替换和真实用户分布仍需要部署验证。完整验收见 [验收报告](recovery-acceptance.md)，页面与实测图表见 [成果展示](showcase.md)。
