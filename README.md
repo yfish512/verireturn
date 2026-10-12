@@ -16,7 +16,7 @@
 
 ![客户恢复页面：重新确认后继续任务](docs/images/customer-recovery.png)
 
-[更多截图与图片生成方法](docs/showcase.md)
+[20 组恢复案例与真实轨迹](docs/recovery-cases.md) · [更多截图与图片生成方法](docs/showcase.md)
 
 ## 技术栈与验证
 

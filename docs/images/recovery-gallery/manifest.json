@@ -1,0 +1,191 @@
+{
+  "cases": [
+    {
+      "index": 1,
+      "source": "formal-v2",
+      "episode": "read_once-001:r0",
+      "title": "一次读取失败",
+      "family": "读取异常",
+      "note": "两组均重试成功，展示基础恢复。",
+      "image": "01-read_once-001-formal-v2.png"
+    },
+    {
+      "index": 2,
+      "source": "formal-v2",
+      "episode": "read_twice-001:r0",
+      "title": "连续两次读取失败",
+      "family": "读取异常",
+      "note": "普通模型转人工；恢复模型在预算内再次读取。",
+      "image": "02-read_twice-001-formal-v2.png"
+    },
+    {
+      "index": 3,
+      "source": "formal-v2",
+      "episode": "read_persistent-001:r0",
+      "title": "持续不可用",
+      "family": "读取异常",
+      "note": "两组均转人工，未将开放任务计为完成。",
+      "image": "03-read_persistent-001-formal-v2.png"
+    },
+    {
+      "index": 4,
+      "source": "formal-v2",
+      "episode": "read_verification-001:r0",
+      "title": "核验过程中再次失败",
+      "family": "读取异常",
+      "note": "恢复模型再次核验，普通模型提前转人工。",
+      "image": "04-read_verification-001-formal-v2.png"
+    },
+    {
+      "index": 5,
+      "source": "formal-v2",
+      "episode": "write_before_commit-001:r0",
+      "title": "提交前失败",
+      "family": "退款结果未知",
+      "note": "取得未执行证据后重试，再核对渠道结果。",
+      "image": "05-write_before_commit-001-formal-v2.png"
+    },
+    {
+      "index": 6,
+      "source": "formal-v2",
+      "episode": "write_remote_only-001:r0",
+      "title": "渠道接受，本地未回写",
+      "family": "退款结果未知",
+      "note": "先核验渠道事实，避免盲目重新提交。",
+      "image": "06-write_remote_only-001-formal-v2.png"
+    },
+    {
+      "index": 7,
+      "source": "formal-v2",
+      "episode": "write_response_lost-001:r0",
+      "title": "执行成功，响应丢失",
+      "family": "退款结果未知",
+      "note": "查询已有执行结果，最终核对账本与渠道。",
+      "image": "07-write_response_lost-001-formal-v2.png"
+    },
+    {
+      "index": 8,
+      "source": "formal-v2",
+      "episode": "write_query_unavailable-001:r0",
+      "title": "状态查询暂时不可用",
+      "family": "退款结果未知",
+      "note": "核验失败后继续查询，保持写入结果未决。",
+      "image": "08-write_query_unavailable-001-formal-v2.png"
+    },
+    {
+      "index": 9,
+      "source": "formal-v2",
+      "episode": "stock_restored-001:r0",
+      "title": "原 SKU 恢复库存",
+      "family": "确认期间状态变化",
+      "note": "刷新业务状态并重新获得客户确认。",
+      "image": "09-stock_restored-001-formal-v2.png"
+    },
+    {
+      "index": 10,
+      "source": "formal-v2",
+      "episode": "stock_alternative-001:r0",
+      "title": "选择替换 SKU",
+      "family": "确认期间状态变化",
+      "note": "客户确认允许的替换方案后完成履约。",
+      "image": "10-stock_alternative-001-formal-v2.png"
+    },
+    {
+      "index": 11,
+      "source": "formal-v2",
+      "episode": "stock_refund-001:r0",
+      "title": "换货改为退款",
+      "family": "确认期间状态变化",
+      "note": "新授权关联退款单，按退款事实判定完成。",
+      "image": "11-stock_refund-001-formal-v2.png"
+    },
+    {
+      "index": 12,
+      "source": "formal-v2",
+      "episode": "stock_wait_human-001:r0",
+      "title": "客户等待补货",
+      "family": "确认期间状态变化",
+      "note": "保持开放任务；等待补货不等于业务完成。",
+      "image": "12-stock_wait_human-001-formal-v2.png"
+    },
+    {
+      "index": 13,
+      "source": "formal-v2",
+      "episode": "stock_wait_human-002:r0",
+      "title": "客户选择人工处理",
+      "family": "客户分支",
+      "note": "工单已创建，单独统计人工处理。",
+      "image": "13-stock_wait_human-002-formal-v2.png"
+    },
+    {
+      "index": 14,
+      "source": "formal-v2",
+      "episode": "stock_wait_human-003:r0",
+      "title": "客户拒绝新方案",
+      "family": "客户分支",
+      "note": "确认被拒绝，不擅自执行退款或换货。",
+      "image": "14-stock_wait_human-003-formal-v2.png"
+    },
+    {
+      "index": 15,
+      "source": "formal-v2",
+      "episode": "stock_wait_human-004:r0",
+      "title": "客户尚未回复",
+      "family": "客户分支",
+      "note": "保留待确认状态，不把沉默当成授权。",
+      "image": "15-stock_wait_human-004-formal-v2.png"
+    },
+    {
+      "index": 16,
+      "source": "formal-v2",
+      "episode": "stock_wait_human-005:r0",
+      "title": "客户撤回任务",
+      "family": "客户分支",
+      "note": "恢复任务取消，未完成业务。",
+      "image": "16-stock_wait_human-005-formal-v2.png"
+    },
+    {
+      "index": 17,
+      "source": "formal-v2",
+      "episode": "read_persistent-011:r0",
+      "title": "模型错误判断已完成",
+      "family": "失败案例",
+      "note": "核验库存不等于完成换货；独立判定器拒绝计分。",
+      "image": "17-read_persistent-011-formal-v2.png"
+    },
+    {
+      "index": 18,
+      "source": "formal-v2",
+      "episode": "write_query_unavailable-018:r0",
+      "title": "模型服务超时",
+      "family": "失败案例",
+      "note": "规划 API 超时显式记录，未切回规则冒充模型成功。",
+      "image": "18-write_query_unavailable-018-formal-v2.png"
+    },
+    {
+      "index": 19,
+      "source": "repair-v3-final",
+      "episode": "read_persistent-005:r0",
+      "title": "v3：持续故障转人工",
+      "family": "修复专项",
+      "note": "模型选择转人工；专项结果不替换正式效果统计。",
+      "image": "19-read_persistent-005-repair-v3-final.png"
+    },
+    {
+      "index": 20,
+      "source": "repair-v3-final",
+      "episode": "read_persistent-001:r0",
+      "title": "v3：预算耗尽兜底",
+      "family": "修复专项",
+      "note": "系统创建工单，不能计为模型自主恢复。",
+      "image": "20-read_persistent-001-repair-v3-final.png"
+    }
+  ],
+  "source_hashes": {
+    "formal-v2.results.jsonl.gz": "9afeedf581ee0693200339491fbd2672d69351814664dd4c812e5654d94f2a2f",
+    "repair-v3-final.results.jsonl.gz": "086a743028c42e7688156cefa78b3b372b04bc2e075b1502af982cd5443efe84"
+  },
+  "browser_errors": [],
+  "model_requests": 0,
+  "illustration_type": "archived_evidence"
+}

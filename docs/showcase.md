@@ -36,6 +36,14 @@
 
 [查看原尺寸 PNG](images/strategy-comparison.png)
 
+## 更多恢复案例
+
+补充了 [20 组案例、40 条真实模型轨迹](recovery-cases.md)：覆盖全部 12 个故障变体，包含退款结果未知、库存变化与新确认、客户拒绝/未回复/撤回、模型误判、服务超时及预算停止。每组并排显示两种策略的模型理由、工具反馈、最终业务事实与成本。
+
+![20 组案例总览](images/recovery-gallery/overview.png)
+
+这些新增图片是已有归档证据的可视化；v2 正式结果与 v3 修复专项分开标注。下载 [离线案例集](images/recovery-gallery/casebook.html) 后可用浏览器筛选和查看详情，无需服务器或密钥。
+
 ## 重新生成
 
 在仓库根目录使用已有 Miniforge 环境。图表脚本先校验输入文件的 SHA256 与完成计数；需要 Noto Sans CJK 字体（或通过 `SHOWCASE_FONT_PATH` 指定中文字体）及 Playwright Chromium。
@@ -46,6 +54,7 @@ python -m pip install -r scripts/requirements-showcase.txt
 python -m playwright install chromium
 python -m scripts.verify_recovery_evidence
 python -m scripts.generate_showcase
+python -m scripts.generate_recovery_gallery
 ```
 
 已有 Chromium 时可设置 `PLAYWRIGHT_CHROMIUM_PATH`，无需重复下载。流程图与图表无需数据库、服务或密钥，也不发出模型请求。
